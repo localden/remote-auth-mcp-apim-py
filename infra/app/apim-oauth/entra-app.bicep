@@ -28,10 +28,10 @@ resource entraApp 'Microsoft.Graph/applications@v1.0' = {
   }
   requiredResourceAccess: [
     {
-      resourceAppId: '00000003-0000-0000-c000-000000000000'
+      resourceAppId: '8ae8b916-b70b-4bde-980b-3d2fafaafa87' // Your target application
       resourceAccess: [
         {
-          id: 'e1fe6dd8-ba31-4d61-89e7-88639da4683d' // User.Read
+          id: 'fe4dfec2-18a4-4a84-a478-c67992f9bbb6' // Replace with the actual scope ID for mcp.server
           type: 'Scope'
         }
       ]
