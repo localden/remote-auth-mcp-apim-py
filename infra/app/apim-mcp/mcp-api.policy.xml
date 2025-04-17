@@ -26,16 +26,6 @@
         }" />
         <cache-lookup-value key="@($"EntraToken-{context.Variables.GetValueOrDefault("decryptedSessionKey")}")" variable-name="tokenData" />
         
-        <!-- Debug trace to see the raw token format in the logs -->
-        <trace source="mcp-api-policy" severity="information">
-            <message>@{
-                var accessTokenPreview = string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("tokenData")) 
-                    ? "null" 
-                    : ((string)context.Variables.GetValueOrDefault("tokenData")).Substring(0, Math.Min(100, ((string)context.Variables.GetValueOrDefault("tokenData")).Length)) + "...";
-                return $"AccessToken from cache: {accessTokenPreview}";
-            }</message>
-        </trace>
-        
         <choose>
             <when condition="@(context.Variables.GetValueOrDefault("tokenData") == null)">
                 <return-response>
@@ -63,9 +53,6 @@
                 return "";
             }
         }" />
-        <set-header name="X-Resource-Bearer-Token">
-            <value>@((string)context.Variables.GetValueOrDefault("bearer"))</value>
-        </set-header>
         
         <!-- Modify request body to include the bearer token in the params section -->
         <choose>
