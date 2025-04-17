@@ -22,6 +22,7 @@
         <set-variable name="codeChallengeMethod" value="S256" />
         <set-variable name="redirectUri" value="{{OAuthCallbackUri}}" />
         <set-variable name="clientId" value="{{EntraIDClientId}}" />
+        <set-variable name="resourceClientId" value="{{EntraIDResourceClientId}}" />
         <set-variable name="clientAssertionType" value="@(System.Net.WebUtility.UrlEncode("urn:ietf:params:oauth:client-assertion-type:jwt-bearer"))" />
         <authentication-managed-identity resource="api://AzureADTokenExchange" client-id="{{EntraIDFicClientId}}" output-token-variable-name="ficToken"/>
          
@@ -31,7 +32,7 @@
             <value>application/x-www-form-urlencoded</value>
         </set-header>
         <set-body>@{
-            return $"client_id={context.Variables.GetValueOrDefault("clientId")}&grant_type=authorization_code&code={context.Variables.GetValueOrDefault("authCode")}&redirect_uri={context.Variables.GetValueOrDefault("redirectUri")}&scope=api%3A%2F%2Ffe4dfec2-18a4-4a84-a478-c67992f9bbb6%2Fmcp.server&code_verifier={context.Variables.GetValueOrDefault("codeVerifier")}&client_assertion_type={context.Variables.GetValueOrDefault("clientAssertionType")}&client_assertion={context.Variables.GetValueOrDefault("ficToken")}";
+            return $"client_id={context.Variables.GetValueOrDefault("clientId")}&grant_type=authorization_code&code={context.Variables.GetValueOrDefault("authCode")}&redirect_uri={context.Variables.GetValueOrDefault("redirectUri")}&scope=api%3A%2F%2F{context.Variables.GetValueOrDefault("resourceClientId")}%2Fmcp.server.read&code_verifier={context.Variables.GetValueOrDefault("codeVerifier")}&client_assertion_type={context.Variables.GetValueOrDefault("clientAssertionType")}&client_assertion={context.Variables.GetValueOrDefault("ficToken")}";
         }</set-body>
         <rewrite-uri template="/token" />
     </inbound>

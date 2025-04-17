@@ -81,6 +81,16 @@ resource EntraIDClientIdNamedValue 'Microsoft.ApiManagement/service/namedValues@
   }
 }
 
+resource EntraIDResourceClientIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2021-08-01' = {
+  parent: apimService
+  name: 'EntraIDResourceClientId'
+  properties: {
+    displayName: 'EntraIDResourceClientId'
+    value: entraResourceApp.outputs.entraAppId
+    secret: false
+  }
+}
+
 resource EntraIdFicClientIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2021-08-01' = {
   parent: apimService
   name: 'EntraIDFicClientId'
