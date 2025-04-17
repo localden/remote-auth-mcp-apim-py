@@ -15,20 +15,43 @@ param entraAppUserAssignedIdentityPrincipleId string
 param entraAppUserAssignedIdentityClientId string
 
 @description('The name of the Entra application')
-param entraAppUniqueName string
+param entraClientAppUniqueName string
 
 @description('The display name of the Entra application')
-param entraAppDisplayName string
+param entraClientAppDisplayName string
+
+
+@description('The name of the Entra application')
+param entraResourceAppUniqueName string
+
+@description('The display name of the Entra application')
+param entraResourceAppDisplayName string
 
 resource apimService 'Microsoft.ApiManagement/service@2021-08-01' existing = {
   name: apimServiceName
 }
 
-module entraApp './entra-app.bicep' = {
-  name: 'entraApp'
+// This is for creating the Entra Resource application for OBO flow
+// Client app will be used for acquiring the token for the resource app
+// And then the resource app token will be exchanged for the Entra resource access token
+module entraResourceApp './entra-resource-app.bicep' = {
+  name: 'entraResourceApp'
   params:{
-    entraAppUniqueName: entraAppUniqueName
-    entraAppDisplayName: entraAppDisplayName
+    entraAppUniqueName: entraResourceAppUniqueName
+    entraAppDisplayName: entraResourceAppDisplayName
+    apimOauthCallback: '${apimService.properties.gatewayUrl}/oauth-callback'
+    userAssignedIdentityPrincipleId: entraAppUserAssignedIdentityPrincipleId
+  }
+}
+
+
+module entraClientApp './entra-client-app.bicep' = {
+  name: 'entraClientApp'
+  params:{
+    entraAppUniqueName: entraClientAppUniqueName
+    entraAppDisplayName: entraClientAppDisplayName
+    resourceAppId: entraResourceApp.outputs.entraAppId
+    resourceAppScopeId: entraResourceApp.outputs.entraAppScopeId
     apimOauthCallback: '${apimService.properties.gatewayUrl}/oauth-callback'
     userAssignedIdentityPrincipleId: entraAppUserAssignedIdentityPrincipleId
   }
@@ -48,7 +71,7 @@ resource EntraIDTenantIdNamedValue 'Microsoft.ApiManagement/service/namedValues@
   name: 'EntraIDTenantId'
   properties: {
     displayName: 'EntraIDTenantId'
-    value: entraApp.outputs.entraAppTenantId
+    value: entraClientApp.outputs.entraAppTenantId
     secret: false
   }
 }
@@ -58,7 +81,7 @@ resource EntraIDClientIdNamedValue 'Microsoft.ApiManagement/service/namedValues@
   name: 'EntraIDClientId'
   properties: {
     displayName: 'EntraIDClientId'
-    value: entraApp.outputs.entraAppId
+    value: entraClientApp.outputs.entraAppId
     secret: false
   }
 }
@@ -118,7 +141,7 @@ resource McpClientIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2021
   name: 'McpClientId'
   properties: {
     displayName: 'McpClientId'
-    value: entraApp.outputs.entraAppId
+    value: entraClientApp.outputs.entraAppId
     secret: false
   }
 }
@@ -145,7 +168,7 @@ resource oauthApi 'Microsoft.ApiManagement/service/apis@2021-08-01' = {
     protocols: [
       'https'
     ]
-    serviceUrl: 'https://login.microsoftonline.com/${entraApp.outputs.entraAppTenantId}/oauth2/v2.0'
+    serviceUrl: 'https://login.microsoftonline.com/${entraClientApp.outputs.entraAppTenantId}/oauth2/v2.0'
   }
 }
 

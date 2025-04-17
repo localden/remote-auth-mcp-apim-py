@@ -15,10 +15,13 @@ param apimOauthCallback string
 @description('The principle id of the user-assigned managed identity')
 param userAssignedIdentityPrincipleId string
 
+@description('The scope ID for adding a new permission scope for the resource app')
+param scopeId string = newGuid()
+
 var loginEndpoint = environment().authentication.loginEndpoint
 var issuer = '${loginEndpoint}${tenantId}/v2.0'
 
-resource entraApp 'Microsoft.Graph/applications@v1.0' = {
+resource entraResourceApp 'Microsoft.Graph/applications@v1.0' = {
   
   displayName: entraAppDisplayName
   uniqueName: entraAppUniqueName
@@ -27,29 +30,37 @@ resource entraApp 'Microsoft.Graph/applications@v1.0' = {
       apimOauthCallback
     ]
   }
+  identifierUris: [
+    'api://${entraAppUniqueName}'
+  ]
+  api: {
+    oauth2PermissionScopes: [
+      {
+        id: scopeId
+        adminConsentDescription: 'Access MCP Server Data'
+        adminConsentDisplayName: 'Access MCP Server Data'
+        isEnabled: true
+        type: 'User'
+        userConsentDescription: 'Access MCP Server Data'
+        userConsentDisplayName: 'Access MCP Server Data'
+        value: 'mcp.server.read'
+      }
+    ]
+  }
   requiredResourceAccess: [
     {
-      resourceAppId: '8ae8b916-b70b-4bde-980b-3d2fafaafa87' // MCP server
+      resourceAppId: '00000003-0000-0000-c000-000000000000' // Microsoft Graph
       resourceAccess: [
         {
-          id: 'fe4dfec2-18a4-4a84-a478-c67992f9bbb6' // mcp.server scope for my app registration
+          id: 'e1fe6dd8-ba31-4d61-89e7-88639da4683d' // Replace with the actual scope ID for mcp.server
           type: 'Scope'
         }
       ]
     }
-    // {
-    //   resourceAppId: '00000003-0000-0000-c000-000000000000' // Microsoft Graph
-    //   resourceAccess: [
-    //     {
-    //       id: 'e1fe6dd8-ba31-4d61-89e7-88639da4683d' // Replace with the actual scope ID for mcp.server
-    //       type: 'Scope'
-    //     }
-    //   ]
-    // }
   ]
 
   resource fic 'federatedIdentityCredentials@v1.0' = {
-    name: '${entraApp.uniqueName}/msiAsFic'
+    name: '${entraResourceApp.uniqueName}/msiAsFic'
     description: 'Trust the user-assigned MI as a credential for the app'
     audiences: [
        'api://AzureADTokenExchange'
@@ -60,5 +71,6 @@ resource entraApp 'Microsoft.Graph/applications@v1.0' = {
 }
 
 // Outputs
-output entraAppId string = entraApp.appId
+output entraAppId string = entraResourceApp.appId
 output entraAppTenantId string = tenantId
+output entraAppScopeId string = entraResourceApp.api.oauth2PermissionScopes[0].id
