@@ -31,10 +31,6 @@ param mcpEntraOBOResourceApplicationDisplayName string = ''
 param disableLocalAuth bool = true
 
 // MCP Client APIM gateway specific variables
-
-//var oauth_scopes = 'openid https://graph.microsoft.com/.default'
-var oauth_scopes = 'api://8ae8b916-b70b-4bde-980b-3d2fafaafa87/mcp.server'
-
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = { 'azd-env-name': environmentName }
@@ -72,7 +68,6 @@ module oauthAPIModule './app/apim-oauth/oauth.bicep' = {
     entraResourceAppUniqueName: !empty(mcpEntraOBOResourceApplicationUniqueName) ? mcpEntraOBOResourceApplicationUniqueName : 'mcp-obo-resource-oauth--${abbrs.applications}${apimResourceToken}'
     entraResourceAppDisplayName: !empty(mcpEntraOBOResourceApplicationDisplayName) ? mcpEntraOBOResourceApplicationDisplayName : 'MCP-OBO-Resource-OAuth-${abbrs.applications}-${apimResourceToken}'
     apimServiceName: apimService.name
-    oauthScopes: oauth_scopes
     entraAppUserAssignedIdentityPrincipleId: apimService.outputs.entraAppUserAssignedIdentityPrincipleId
     entraAppUserAssignedIdentityClientId: apimService.outputs.entraAppUserAssignedIdentityClientId
   }

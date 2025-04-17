@@ -4,10 +4,6 @@ param apimServiceName string
 @description('The Azure region for resources')
 param location string
 
-// Parameters for Named Values
-@description('The required scopes for authorization')
-param oauthScopes string
-
 @description('The principle id of the user-assigned managed identity for Entra app')
 param entraAppUserAssignedIdentityPrincipleId string
 
@@ -110,7 +106,7 @@ resource OAuthScopesNamedValue 'Microsoft.ApiManagement/service/namedValues@2021
   name: 'OAuthScopes'
   properties: {
     displayName: 'OAuthScopes'
-    value: oauthScopes
+    value: 'api://${entraResourceApp.outputs.entraAppId}/mcp.server.read'
     secret: false
   }
 }
