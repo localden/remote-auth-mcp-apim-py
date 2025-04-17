@@ -22,8 +22,14 @@ resource entraResourceApp 'Microsoft.Graph/applications@v1.0' = {
 
   displayName: entraAppDisplayName
   uniqueName: entraAppUniqueName
+}
+
+resource entraResourceAppWithSettings 'Microsoft.Graph/applications@v1.0' = {
+
+  displayName: entraAppDisplayName
+  uniqueName: entraAppUniqueName
   identifierUris: [
-    'api://${entraAppUniqueName}'
+    'api://${entraResourceApp.appId}'
   ]
   api: {
     oauth2PermissionScopes: [
@@ -65,4 +71,4 @@ resource entraResourceApp 'Microsoft.Graph/applications@v1.0' = {
 // Outputs
 output entraAppId string = entraResourceApp.appId
 output entraAppTenantId string = tenantId
-output entraAppScopeId string = entraResourceApp.api.oauth2PermissionScopes[0].id
+output entraAppScopeId string = entraResourceAppWithSettings.api.oauth2PermissionScopes[0].id
