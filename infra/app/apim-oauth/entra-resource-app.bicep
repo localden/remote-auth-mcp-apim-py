@@ -68,6 +68,21 @@ resource entraResourceAppWithSettings 'Microsoft.Graph/applications@v1.0' = {
   }
 }
 
+resource microsoftGraphServicePrincipal 'Microsoft.Graph/servicePrincipals@v1.0' existing = {
+  appId: '00000003-0000-0000-c000-000000000000'
+}
+
+resource applicationRegistrationServicePrincipal 'Microsoft.Graph/servicePrincipals@v1.0' = {
+  appId: entraResourceApp.appId
+}
+
+resource grants 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = {
+  clientId: applicationRegistrationServicePrincipal.id
+  consentType: 'AllPrincipals'
+  resourceId: microsoftGraphServicePrincipal.id
+  scope: 'User.Read'
+}
+
 // Outputs
 output entraAppId string = entraResourceApp.appId
 output entraAppTenantId string = tenantId
