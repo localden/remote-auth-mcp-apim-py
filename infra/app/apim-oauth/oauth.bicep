@@ -39,7 +39,6 @@ module entraResourceApp './entra-resource-app.bicep' = {
   params:{
     entraAppUniqueName: entraResourceAppUniqueName
     entraAppDisplayName: entraResourceAppDisplayName
-    apimOauthCallback: '${apimService.properties.gatewayUrl}/oauth-callback'
     userAssignedIdentityPrincipleId: entraAppUserAssignedIdentityPrincipleId
   }
 }
