@@ -30,8 +30,8 @@ param disableLocalAuth bool = true
 
 // MCP Client APIM gateway specific variables
 
-var oauth_scopes = 'openid https://graph.microsoft.com/.default'
-
+//var oauth_scopes = 'openid https://graph.microsoft.com/.default'
+var oauth_scopes = 'api://8ae8b916-b70b-4bde-980b-3d2fafaafa87/mcp.server'
 
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))

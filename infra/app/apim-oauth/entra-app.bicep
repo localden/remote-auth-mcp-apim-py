@@ -19,6 +19,7 @@ var loginEndpoint = environment().authentication.loginEndpoint
 var issuer = '${loginEndpoint}${tenantId}/v2.0'
 
 resource entraApp 'Microsoft.Graph/applications@v1.0' = {
+  
   displayName: entraAppDisplayName
   uniqueName: entraAppUniqueName
   web: {
@@ -28,14 +29,23 @@ resource entraApp 'Microsoft.Graph/applications@v1.0' = {
   }
   requiredResourceAccess: [
     {
-      resourceAppId: '8ae8b916-b70b-4bde-980b-3d2fafaafa87' // Your target application
+      resourceAppId: '8ae8b916-b70b-4bde-980b-3d2fafaafa87' // MCP server
       resourceAccess: [
         {
-          id: 'fe4dfec2-18a4-4a84-a478-c67992f9bbb6' // Replace with the actual scope ID for mcp.server
+          id: 'fe4dfec2-18a4-4a84-a478-c67992f9bbb6' // mcp.server scope for my app registration
           type: 'Scope'
         }
       ]
     }
+    // {
+    //   resourceAppId: '00000003-0000-0000-c000-000000000000' // Microsoft Graph
+    //   resourceAccess: [
+    //     {
+    //       id: 'e1fe6dd8-ba31-4d61-89e7-88639da4683d' // Replace with the actual scope ID for mcp.server
+    //       type: 'Scope'
+    //     }
+    //   ]
+    // }
   ]
 
   resource fic 'federatedIdentityCredentials@v1.0' = {
