@@ -46,9 +46,31 @@ Follow these steps to get started.
 >[!IMPORTANT]
 >Deploying this project will incur Azure cost. If you are deploying for testing and experimentation, make sure to delete the created resource group after testing.
 
-## Deploying the project to Azure
+## Deploying and testing the project
 
 When you run `azd up`, resources declared in the [`infra`](https://github.com/localden/remote-auth-mcp-apim-py/tree/main/infra) directory will be provisioned in your Azure account. You can go through the existing Bicep files to see what infrastructure will be automatically deployed.
 
 ![GIF showing the deployment of Azure resources with Azure Developer CLI](./media/deploy-azd.gif)
+
+Once the deployment completes, you will be see the **endpoint** printed in the terminal:
+
+![Endpoint in the terminal](./media/completed-deploy.png)
+
+For example, in the screenshot above the endpoint is `https://apim-2lzunaz2nu642.azure-api.net/mcp/sse`. Copy it.
+
+>[!NOTE]
+>Prior to the next step, make sure that you have [Node.js](https://nodejs.org/en) installed - it's required to run the [Model Context Protocol Inspector](https://modelcontextprotocol.io/docs/tools/inspector).
+
+In your terminal, run:
+
+```bash
+npx @modelcontextprotocol/inspector@0.9.0
+```
+
+>[!NOTE]
+>We're using the `0.9.0` release of the Model Context Protocol Inspector because it's the most stable version when it comes to testing protected MCP servers.
+
+This will give an endpoint where you can see Model Context Protocol Inspector running locally. Open the URL in your browser.
+
+Switch the **Transport Type** to **SSE** and set the **URL** to the endpoint that you got from running the deployment. Click **Connect**.
 
