@@ -55,21 +55,44 @@ def get_graph_user_details(context) -> str:
     """   
     
     token_error = None
-
+    
     try:
-        logging.info(f"Context type: {type(context).__name__}")        # Get token for Microsoft Graph API
+        logging.info(f"Context type: {type(context).__name__}")
+          # Parse context to get the bearer token
         try:
-            result = cca_auth_client.acquire_token_for_client(['https://graph.microsoft.com/.default'])
-            if "access_token" in result:
-                logging.info("Successfully acquired access token")
-                token_acquired = True
-                access_token = result["access_token"]
-                token_error = None
-            else:
+            context_obj = json.loads(context)
+            # Navigate through nested structure to find bearerToken in arguments
+            arguments = context_obj.get('arguments', {})
+            bearer_token = None
+            
+            # Log the arguments structure for debugging
+            logging.info(f"Arguments structure: {json.dumps(arguments)[:500]}")
+            
+            if isinstance(arguments, dict):
+                bearer_token = arguments.get('bearerToken')
+            
+            if not bearer_token:
+                logging.warning("No bearer token found in context arguments")
                 token_acquired = False
                 access_token = None
-                token_error = result.get('error_description', 'Unknown error acquiring token')
-                logging.warning(f"Failed to acquire token: {token_error}")
+                token_error = "No bearer token found in context arguments"
+            else:
+                # Use On-Behalf-Of flow with the user's token
+                result = cca_auth_client.acquire_token_on_behalf_of(
+                    user_assertion=bearer_token,
+                    scopes=['https://graph.microsoft.com/.default']
+                )
+                
+                if "access_token" in result:
+                    logging.info("Successfully acquired access token using OBO flow")
+                    token_acquired = True
+                    access_token = result["access_token"]
+                    token_error = None
+                else:
+                    token_acquired = False
+                    access_token = None
+                    token_error = result.get('error_description', 'Unknown error acquiring token')
+                    logging.warning(f"Failed to acquire token using OBO flow: {token_error}")
         except Exception as e:
             token_acquired = False
             access_token = None
