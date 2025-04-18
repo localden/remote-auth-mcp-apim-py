@@ -30,11 +30,11 @@ def get_managed_identity_token(audience):
     else:
         raise Exception(f"Failed to acquire token: {token.get('error_description', 'Unknown error')}")
 
-# cca_auth_client = msal.ConfidentialClientApplication(
-#     application_cid, 
-#     authority=f'https://login.microsoftonline.com/{application_tenant}',
-#     client_credential={"client_assertion": get_managed_identity_token('api://AzureADTokenExchange')}
-# )
+cca_auth_client = msal.ConfidentialClientApplication(
+    application_cid, 
+    authority=f'https://login.microsoftonline.com/{application_tenant}',
+    client_credential={"client_assertion": get_managed_identity_token('api://AzureADTokenExchange')}
+)
 
 @app.generic_trigger(
     arg_name="context",
@@ -57,52 +57,55 @@ def get_graph_user_details(context) -> str:
     token_error = None
 
     try:
-        logging.info(f"Context type: {type(context).__name__}")
-
-        # Get a managed identity token
+        logging.info(f"Context type: {type(context).__name__}")        # Get token for Microsoft Graph API
         try:
-            # Use the existing function to get a managed identity token for Microsoft Graph
-            mi_token = get_managed_identity_token("api://AzureADTokenExchange")
-            token_acquired = True
-            token_error = None
-        except Exception as mi_error:
-            mi_token = None
+            result = app.acquire_token_for_client(['User.Read'])
+            if "access_token" in result:
+                logging.info("Successfully acquired access token")
+                token_acquired = True
+                access_token = result["access_token"]
+                token_error = None
+            else:
+                token_acquired = False
+                access_token = None
+                token_error = result.get('error_description', 'Unknown error acquiring token')
+                logging.warning(f"Failed to acquire token: {token_error}")
+        except Exception as e:
             token_acquired = False
-            token_error = str(mi_error)
-            logging.warning(f"Failed to acquire managed identity token: {token_error}")
-        
+            access_token = None
+            token_error = str(e)
+            logging.error(f"Exception when acquiring token: {token_error}")
+
         try:
-            context_obj = json.loads(context)
-            # Add the Azure application details to the response
+            context_obj = json.loads(context)            # Add the Azure application details to the response
             context_obj['application_uami'] = application_uami
             context_obj['application_cid'] = application_cid
             context_obj['application_tenant'] = application_tenant
 
-            # Add the managed identity token information
-            context_obj['mi_token_acquired'] = token_acquired
+            # Add the token information
+            context_obj['token_acquired'] = token_acquired
             if token_acquired:
-                context_obj['managed_identity_token'] = mi_token
+                context_obj['access_token'] = access_token
             else:
-                context_obj['mi_token_error'] = str(token_error)
+                context_obj['token_error'] = token_error
             
             logging.info(f"Received context object: {json.dumps(context_obj)[:500]}...")
             return json.dumps(context_obj, indent=2)
         except json.JSONDecodeError:
             logging.info("Context is not valid JSON, returning as is")
-            # For non-JSON context, we'll need to return a JSON object instead
+            # For non-JSON context, we'll need to return a JSON object instead            
             response = {
                 "original_context": context, 
                 "application_uami": application_uami,
                 "application_cid": application_cid,
                 "application_tenant": application_tenant,
-                "mi_token_acquired": token_acquired
+                "token_acquired": token_acquired
             }
             
-            # Add token info
             if token_acquired:
-                response['managed_identity_token'] = mi_token
+                response['access_token'] = access_token
             else:
-                response['mi_token_error'] = str(token_error)
+                response['token_error'] = token_error
             
             return json.dumps(response, indent=2)
         
