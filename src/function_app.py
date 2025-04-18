@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import requests
+import msal
 
 import azure.functions as func
 from msgraph import GraphServiceClient
@@ -10,30 +11,29 @@ from kiota_authentication_azure.azure_identity_authentication_provider import Az
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
-# Constants for the Azure Blob Storage container, file, and blob path
-_SNIPPET_NAME_PROPERTY_NAME = "snippetname"
-_SNIPPET_PROPERTY_NAME = "snippet"
-_BLOB_PATH = "snippets/{mcptoolargs." + _SNIPPET_NAME_PROPERTY_NAME + "}.json"
+# This variable is set in Bicep and is automatically provisioned.
+application_uami = os.environ.get('APPLICATION_UAMI', 'Not set')
+application_cid = os.environ.get('APPLICATION_CID', 'Not set')
+application_tenant = os.environ.get('APPLICATION_TENANT', 'Not set')
 
-@dataclass
-class ToolProperty:
-    propertyName: str
-    propertyType: str
-    description: str
+managed_identity = msal.UserAssignedManagedIdentity(client_id=application_uami)
 
+mi_auth_client = msal.ManagedIdentityClient(managed_identity, http_client=requests.Session())
 
-# Define the tool properties using the ToolProperty class
-tool_properties_save_snippets_object = [
-    ToolProperty(_SNIPPET_NAME_PROPERTY_NAME, "string", "The name of the snippet."),
-    ToolProperty(_SNIPPET_PROPERTY_NAME, "string", "The content of the snippet."),
-]
+# Define the token function before using it
+def get_managed_identity_token(audience):
+    token = mi_auth_client.acquire_token_for_client(resource=audience)
 
-tool_properties_get_snippets_object = [ToolProperty(_SNIPPET_NAME_PROPERTY_NAME, "string", "The name of the snippet.")]
+    if "access_token" in token:
+        return token["access_token"]
+    else:
+        raise Exception(f"Failed to acquire token: {token.get('error_description', 'Unknown error')}")
 
-# Convert the tool properties to JSON
-tool_properties_save_snippets_json = json.dumps([prop.__dict__ for prop in tool_properties_save_snippets_object])
-tool_properties_get_snippets_json = json.dumps([prop.__dict__ for prop in tool_properties_get_snippets_object])
-
+# cca_auth_client = msal.ConfidentialClientApplication(
+#     application_cid, 
+#     authority=f'https://login.microsoftonline.com/{application_tenant}',
+#     client_credential={"client_assertion": get_managed_identity_token('api://AzureADTokenExchange')}
+# )
 
 @app.generic_trigger(
     arg_name="context",
@@ -51,36 +51,62 @@ def get_graph_user_details(context) -> str:
 
     Returns:
         str: The full context as JSON for inspection.
-    """    
+    """   
+    
     try:
         logging.info(f"Context type: {type(context).__name__}")
+
+        # Get a managed identity token
+        try:
+            # Use the existing function to get a managed identity token for Microsoft Graph
+            mi_token = get_managed_identity_token("api://AzureADTokenExchange")
+            token_acquired = True
+            token_error = None
+        except Exception as token_error:
+            mi_token = None
+            token_acquired = False
+            token_error = str(token_error)
+            logging.warning(f"Failed to acquire managed identity token: {token_error}")
         
-        # Get the APPLICATION_UAMI environment variable value
-        application_uami = os.environ.get('APPLICATION_UAMI', 'Not set')
-        
-        # Just log and return the context directly
-        if isinstance(context, str):
-            # If it's a string, try to pretty-print the JSON
-            try:
-                context_obj = json.loads(context)
-                # Add the APPLICATION_UAMI value to the response
-                context_obj['application_uami'] = application_uami
-                logging.info(f"Received context object: {json.dumps(context_obj)[:500]}...")
-                return json.dumps(context_obj, indent=2)
-            except json.JSONDecodeError:
-                logging.info("Context is not valid JSON, returning as is")
-                # For non-JSON context, we'll need to return a JSON object instead
-                return json.dumps({"original_context": context, "application_uami": application_uami}, indent=2)
-        else:
-            # If it's already an object, add the APPLICATION_UAMI and return it pretty-printed
-            if isinstance(context, dict):
-                context['application_uami'] = application_uami
-            else:
-                # If it's not a dict, convert to dict with the original context and add APPLICATION_UAMI
-                context = {"original_context": str(context), "application_uami": application_uami}
+        try:
+            context_obj = json.loads(context)
+            # Add the Azure application details to the response
+            context_obj['application_uami'] = application_uami
+            context_obj['application_cid'] = application_cid
+            context_obj['application_tenant'] = application_tenant
+            context_obj['is_context_object'] = False  # It was a string that we parsed into an object
             
-            logging.info(f"Received context object: {str(context)[:500]}...")
-            return json.dumps(context, indent=2, default=str)
+            # Add the managed identity token information
+            context_obj['mi_token_acquired'] = token_acquired
+            if token_acquired:
+                context_obj['managed_identity_token'] = mi_token
+            else:
+                context_obj['mi_token_error'] = str(token_error)
+            
+            logging.info(f"Received context object: {json.dumps(context_obj)[:500]}...")
+            return json.dumps(context_obj, indent=2)
+        except json.JSONDecodeError:
+            logging.info("Context is not valid JSON, returning as is")
+            # For non-JSON context, we'll need to return a JSON object instead
+            response = {
+                "original_context": context, 
+                "application_uami": application_uami,
+                "application_cid": application_cid,
+                "application_tenant": application_tenant,
+                "is_context_object": False,  # It was a string that wasn't valid JSON
+                "mi_token_acquired": token_acquired
+            }
+            
+            # Add token info
+            if token_acquired:
+                response['managed_identity_token'] = mi_token
+            else:
+                response['mi_token_error'] = str(token_error)
+            
+            return json.dumps(response, indent=2)
+        
+        logging.info(f"Received context object: {str(context)[:500]}...")
+        return json.dumps(context, indent=2, default=str)
             
     except Exception as e:
         logging.error(f"Exception in hello_mcp: {str(e)}")
@@ -90,14 +116,11 @@ def get_graph_user_details(context) -> str:
             "raw_context": str(context)[:1000] + ("..." if len(str(context)) > 1000 else "")
         }, indent=2)
 
-def get_managed_identity_token(audience, miClientId):
-    url = f'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource={audience}&client_id={miClientId}'
-    headers = {'Metadata': 'true'}
+def get_managed_identity_token(audience):
+    token = mi_auth_client.acquire_token_for_client(resource=audience)
 
-    response = requests.get(url, headers=headers)
-
-    if response.status_code == 200:
-        return response.json()['access_token']
+    if "access_token" in token:
+        return token["access_token"]
     else:
-        return None
+        raise Exception(f"Failed to acquire token: {token.get('error_description', 'Unknown error')}")
 

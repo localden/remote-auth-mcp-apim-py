@@ -150,6 +150,8 @@ module api './app/api.bicep' = {
     identityClientId: apiUserAssignedIdentity.outputs.identityClientId
     appSettings: {
       APPLICATION_UAMI: apimService.outputs.entraAppUserAssignedIdentityClientId
+      APPLICATION_CID: oauthAPIModule.outputs.entraResourceAppId
+      APPLICATION_TENANT: tenant().tenantId
     }
     virtualNetworkSubnetId: !vnetEnabled ? '' : serviceVirtualNetwork.outputs.appSubnetID
   }

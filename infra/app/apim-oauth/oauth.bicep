@@ -336,3 +336,4 @@ resource oauthMetadataGetPolicy 'Microsoft.ApiManagement/service/apis/operations
 }
 
 output apiId string = oauthApi.id
+output entraResourceAppId string = entraResourceApp.outputs.entraAppId
