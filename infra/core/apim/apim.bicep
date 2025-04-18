@@ -110,3 +110,4 @@ output principalId string = apimService.identity.principalId
 output gatewayUrl string = apimService.properties.gatewayUrl
 output entraAppUserAssignedIdentityPrincipleId string = entraAppUserAssignedIdentity.properties.principalId
 output entraAppUserAssignedIdentityClientId string = entraAppUserAssignedIdentity.properties.clientId
+output entraAppUserAssignedIdentityId string = entraAppUserAssignedIdentity.id

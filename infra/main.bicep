@@ -146,7 +146,10 @@ module api './app/api.bicep' = {
     runtimeVersion: '3.11'
     storageAccountName: storage.outputs.name
     deploymentStorageContainerName: deploymentStorageContainerName
-    identityId: apiUserAssignedIdentity.outputs.identityId
+    identityIds: [
+      apiUserAssignedIdentity.outputs.identityId
+      apimService.outputs.entraAppUserAssignedIdentityId
+    ]
     identityClientId: apiUserAssignedIdentity.outputs.identityClientId
     appSettings: {
       APPLICATION_UAMI: apimService.outputs.entraAppUserAssignedIdentityClientId

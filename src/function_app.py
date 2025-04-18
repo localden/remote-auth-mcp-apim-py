@@ -4,6 +4,7 @@ import logging
 import os
 import requests
 import msal
+import traceback
 
 import azure.functions as func
 from msgraph import GraphServiceClient
@@ -53,6 +54,8 @@ def get_graph_user_details(context) -> str:
         str: The full context as JSON for inspection.
     """   
     
+    token_error = None
+
     try:
         logging.info(f"Context type: {type(context).__name__}")
 
@@ -62,10 +65,10 @@ def get_graph_user_details(context) -> str:
             mi_token = get_managed_identity_token("api://AzureADTokenExchange")
             token_acquired = True
             token_error = None
-        except Exception as token_error:
+        except Exception as mi_error:
             mi_token = None
             token_acquired = False
-            token_error = str(token_error)
+            token_error = str(mi_error)
             logging.warning(f"Failed to acquire managed identity token: {token_error}")
         
         try:
@@ -74,8 +77,7 @@ def get_graph_user_details(context) -> str:
             context_obj['application_uami'] = application_uami
             context_obj['application_cid'] = application_cid
             context_obj['application_tenant'] = application_tenant
-            context_obj['is_context_object'] = False  # It was a string that we parsed into an object
-            
+
             # Add the managed identity token information
             context_obj['mi_token_acquired'] = token_acquired
             if token_acquired:
@@ -93,7 +95,6 @@ def get_graph_user_details(context) -> str:
                 "application_uami": application_uami,
                 "application_cid": application_cid,
                 "application_tenant": application_tenant,
-                "is_context_object": False,  # It was a string that wasn't valid JSON
                 "mi_token_acquired": token_acquired
             }
             
@@ -107,13 +108,12 @@ def get_graph_user_details(context) -> str:
         
         logging.info(f"Received context object: {str(context)[:500]}...")
         return json.dumps(context, indent=2, default=str)
-            
     except Exception as e:
-        logging.error(f"Exception in hello_mcp: {str(e)}")
+        stack_trace = traceback.format_exc()
         return json.dumps({
-            "error": f"An error occurred: {str(e)}",
-            "raw_context_type": str(type(context)),
-            "raw_context": str(context)[:1000] + ("..." if len(str(context)) > 1000 else "")
+            "error": f"An error occurred: {str(e)}\n{stack_trace}",
+            "stack_trace": stack_trace,
+            "raw_context": str(context)
         }, indent=2)
 
 def get_managed_identity_token(audience):

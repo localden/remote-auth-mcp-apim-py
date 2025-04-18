@@ -12,7 +12,7 @@ param deploymentStorageContainerName string
 param virtualNetworkSubnetId string = ''
 param instanceMemoryMB int = 2048
 param maximumInstanceCount int = 100
-param identityId string = ''
+param identityIds array = []
 param identityClientId string = ''
 
 var applicationInsightsIdentity = 'ClientId=${identityClientId};Authorization=AAD'
@@ -24,7 +24,7 @@ module api '../core/host/functions-flexconsumption.bicep' = {
     location: location
     tags: union(tags, { 'azd-service-name': serviceName })
     identityType: 'UserAssigned'
-    identityId: identityId
+    identityIds: identityIds
     appSettings: union(appSettings,
       {
         AzureWebJobsStorage__clientId : identityClientId
