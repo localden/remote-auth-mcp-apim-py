@@ -55,9 +55,6 @@ def get_graph_user_details(context) -> str:
     try:
         logging.info(f"Context type: {type(context).__name__}")
         
-        managed_identity_credential = ManagedIdentityCredential(client_id=MI_CLIENT_ID)
-        credential = ClientAssertionCredential(RESOURCE_TENANT_ID, APP_CLIENT_ID, lambda: get_managed_identity_token(managed_identity_credential, AUDIENCE))
-
         # Get the APPLICATION_UAMI environment variable value
         application_uami = os.environ.get('APPLICATION_UAMI', 'Not set')
         
@@ -92,57 +89,6 @@ def get_graph_user_details(context) -> str:
             "raw_context_type": str(type(context)),
             "raw_context": str(context)[:1000] + ("..." if len(str(context)) > 1000 else "")
         }, indent=2)
-
-
-@app.generic_trigger(
-    arg_name="context",
-    type="mcpToolTrigger",
-    toolName="get_snippet",
-    description="Retrieve a snippet by name.",
-    toolProperties=tool_properties_get_snippets_json,
-)
-@app.generic_input_binding(arg_name="file", type="blob", connection="AzureWebJobsStorage", path=_BLOB_PATH)
-def get_snippet(file: func.InputStream, context) -> str:
-    """
-    Retrieves a snippet by name from Azure Blob Storage.
-
-    Args:
-        file (func.InputStream): The input binding to read the snippet from Azure Blob Storage.
-        context: The trigger context containing the input arguments.
-
-    Returns:
-        str: The content of the snippet or an error message.
-    """
-    snippet_content = file.read().decode("utf-8")
-    logging.info("Retrieved snippet: %s", snippet_content)
-    return snippet_content
-
-
-@app.generic_trigger(
-    arg_name="context",
-    type="mcpToolTrigger",
-    toolName="save_snippet",
-    description="Save a snippet with a name.",
-    toolProperties=tool_properties_save_snippets_json,
-)
-@app.generic_output_binding(arg_name="file", type="blob", connection="AzureWebJobsStorage", path=_BLOB_PATH)
-def save_snippet(file: func.Out[str], context) -> str:
-    content = json.loads(context)
-    if "arguments" not in content:
-        return "No arguments provided"
-
-    snippet_name_from_args = content["arguments"].get(_SNIPPET_NAME_PROPERTY_NAME)
-    snippet_content_from_args = content["arguments"].get(_SNIPPET_PROPERTY_NAME)
-
-    if not snippet_name_from_args:
-        return "No snippet name provided"
-
-    if not snippet_content_from_args:
-        return "No snippet content provided"
-
-    file.set(snippet_content_from_args)
-    logging.info("Saved snippet: %s", snippet_content_from_args)
-    return f"Snippet '{snippet_content_from_args}' saved successfully"
 
 def get_managed_identity_token(audience, miClientId):
     url = f'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource={audience}&client_id={miClientId}'
