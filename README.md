@@ -74,7 +74,7 @@ This will give an endpoint where you can see Model Context Protocol Inspector ru
 
 Switch the **Transport Type** to **SSE** and set the **URL** to the endpoint that you got from running the deployment. Click **Connect**.
 
-<!-- GIF -->
+![Authenticating in the MCP Inspector](./media/mcp-auth.gif)
 
 You will be prompted to authenticate with the credentials **in the tenant in which you deployed the infrastructure**. The Entra ID applications are dynamically registered at deployment time - one for the server, and another that will be used for [on-behalf-of flow](https://learn.microsoft.com/entra/identity-platform/v2-oauth2-on-behalf-of-flow) to acquire [Microsoft Graph](https://learn.microsoft.com/graph/use-the-api) access.
 
@@ -89,3 +89,7 @@ Once connected, click on **List Tools** and select `get_graph_user_data`. This w
 If all goes well, you will see your user data in the response block.
 
 <!-- IMAGE -->
+
+## Feedback and reporting issues
+
+Make sure to [open an issue](https://github.com/localden/remote-auth-mcp-apim-py/issues) if you encounter any roadblocks or have comments.
