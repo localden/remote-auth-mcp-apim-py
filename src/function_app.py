@@ -15,7 +15,6 @@ _SNIPPET_NAME_PROPERTY_NAME = "snippetname"
 _SNIPPET_PROPERTY_NAME = "snippet"
 _BLOB_PATH = "snippets/{mcptoolargs." + _SNIPPET_NAME_PROPERTY_NAME + "}.json"
 
-
 @dataclass
 class ToolProperty:
     propertyName: str
@@ -39,11 +38,11 @@ tool_properties_get_snippets_json = json.dumps([prop.__dict__ for prop in tool_p
 @app.generic_trigger(
     arg_name="context",
     type="mcpToolTrigger",
-    toolName="hello_mcp",
-    description="Get authenticated user details from Microsoft Graph.",
+    toolName="get_graph_user_details",
+    description="Get user details from Microsoft Graph.",
     toolProperties="[]",
 )
-def hello_mcp(context) -> str:
+def get_graph_user_details(context) -> str:
     """
     A function that simply returns the context for debugging purposes.
 
@@ -52,22 +51,37 @@ def hello_mcp(context) -> str:
 
     Returns:
         str: The full context as JSON for inspection.
-    """
+    """    
     try:
         logging.info(f"Context type: {type(context).__name__}")
+        
+        managed_identity_credential = ManagedIdentityCredential(client_id=MI_CLIENT_ID)
+        credential = ClientAssertionCredential(RESOURCE_TENANT_ID, APP_CLIENT_ID, lambda: get_managed_identity_token(managed_identity_credential, AUDIENCE))
+
+        # Get the APPLICATION_UAMI environment variable value
+        application_uami = os.environ.get('APPLICATION_UAMI', 'Not set')
         
         # Just log and return the context directly
         if isinstance(context, str):
             # If it's a string, try to pretty-print the JSON
             try:
                 context_obj = json.loads(context)
+                # Add the APPLICATION_UAMI value to the response
+                context_obj['application_uami'] = application_uami
                 logging.info(f"Received context object: {json.dumps(context_obj)[:500]}...")
                 return json.dumps(context_obj, indent=2)
             except json.JSONDecodeError:
                 logging.info("Context is not valid JSON, returning as is")
-                return context
+                # For non-JSON context, we'll need to return a JSON object instead
+                return json.dumps({"original_context": context, "application_uami": application_uami}, indent=2)
         else:
-            # If it's already an object, just return it pretty-printed
+            # If it's already an object, add the APPLICATION_UAMI and return it pretty-printed
+            if isinstance(context, dict):
+                context['application_uami'] = application_uami
+            else:
+                # If it's not a dict, convert to dict with the original context and add APPLICATION_UAMI
+                context = {"original_context": str(context), "application_uami": application_uami}
+            
             logging.info(f"Received context object: {str(context)[:500]}...")
             return json.dumps(context, indent=2, default=str)
             
@@ -129,3 +143,15 @@ def save_snippet(file: func.Out[str], context) -> str:
     file.set(snippet_content_from_args)
     logging.info("Saved snippet: %s", snippet_content_from_args)
     return f"Snippet '{snippet_content_from_args}' saved successfully"
+
+def get_managed_identity_token(audience, miClientId):
+    url = f'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource={audience}&client_id={miClientId}'
+    headers = {'Metadata': 'true'}
+
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        return response.json()['access_token']
+    else:
+        return None
+

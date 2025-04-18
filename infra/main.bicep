@@ -5,10 +5,21 @@ targetScope = 'subscription'
 @description('Name of the the environment which is used to generate a short unique hash used in all resources.')
 param environmentName string
 
-
 @minLength(1)
 @description('Primary location for all resources')
-@allowed(['australiaeast', 'eastasia', 'eastus', 'eastus2', 'northeurope', 'southcentralus', 'southeastasia', 'swedencentral', 'uksouth', 'westus2', 'eastus2euap'])
+@allowed([
+  'australiaeast'
+  'eastasia'
+  'eastus'
+  'eastus2'
+  'northeurope'
+  'southcentralus'
+  'southeastasia'
+  'swedencentral'
+  'uksouth'
+  'westus2'
+  'eastus2euap'
+])
 @metadata({
   azd: {
     type: 'location'
@@ -37,7 +48,6 @@ var tags = { 'azd-env-name': environmentName }
 var functionAppName = !empty(apiServiceName) ? apiServiceName : '${abbrs.webSitesFunctions}api-${resourceToken}'
 var deploymentStorageContainerName = 'app-package-${take(functionAppName, 32)}-${take(toLower(uniqueString(functionAppName, resourceToken)), 7)}'
 
-
 // Organize resources in a resource group
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   name: !empty(resourceGroupName) ? resourceGroupName : '${abbrs.resourcesResourceGroups}${environmentName}'
@@ -52,7 +62,7 @@ var apiManagementName = '${abbrs.apiManagementService}${apimResourceToken}'
 module apimService './core/apim/apim.bicep' = {
   name: apiManagementName
   scope: rg
-  params:{
+  params: {
     apiManagementName: apiManagementName
   }
 }
@@ -63,10 +73,18 @@ module oauthAPIModule './app/apim-oauth/oauth.bicep' = {
   scope: rg
   params: {
     location: location
-    entraClientAppUniqueName: !empty(mcpEntraClientApplicationUniqueName) ? mcpEntraClientApplicationUniqueName : 'mcp-obo-client-oauth--${abbrs.applications}${apimResourceToken}'
-    entraClientAppDisplayName: !empty(mcpEntraClientApplicationDisplayName) ? mcpEntraClientApplicationDisplayName : 'MCP-OBO-Client-OAuth-${abbrs.applications}-${apimResourceToken}'
-    entraResourceAppUniqueName: !empty(mcpEntraOBOResourceApplicationUniqueName) ? mcpEntraOBOResourceApplicationUniqueName : 'mcp-obo-resource-oauth--${abbrs.applications}${apimResourceToken}'
-    entraResourceAppDisplayName: !empty(mcpEntraOBOResourceApplicationDisplayName) ? mcpEntraOBOResourceApplicationDisplayName : 'MCP-OBO-Resource-OAuth-${abbrs.applications}-${apimResourceToken}'
+    entraClientAppUniqueName: !empty(mcpEntraClientApplicationUniqueName)
+      ? mcpEntraClientApplicationUniqueName
+      : 'mcp-obo-client-oauth--${abbrs.applications}${apimResourceToken}'
+    entraClientAppDisplayName: !empty(mcpEntraClientApplicationDisplayName)
+      ? mcpEntraClientApplicationDisplayName
+      : 'MCP-OBO-Client-OAuth-${abbrs.applications}-${apimResourceToken}'
+    entraResourceAppUniqueName: !empty(mcpEntraOBOResourceApplicationUniqueName)
+      ? mcpEntraOBOResourceApplicationUniqueName
+      : 'mcp-obo-resource-oauth--${abbrs.applications}${apimResourceToken}'
+    entraResourceAppDisplayName: !empty(mcpEntraOBOResourceApplicationDisplayName)
+      ? mcpEntraOBOResourceApplicationDisplayName
+      : 'MCP-OBO-Resource-OAuth-${abbrs.applications}-${apimResourceToken}'
     apimServiceName: apimService.name
     entraAppUserAssignedIdentityPrincipleId: apimService.outputs.entraAppUserAssignedIdentityPrincipleId
     entraAppUserAssignedIdentityClientId: apimService.outputs.entraAppUserAssignedIdentityClientId
@@ -87,7 +105,6 @@ module mcpApiModule './app/apim-mcp/mcp-api.bicep' = {
   ]
 }
 
-
 // User assigned managed identity to be used by the function app to reach storage and service bus
 module apiUserAssignedIdentity './core/identity/userAssignedIdentity.bicep' = {
   name: 'apiUserAssignedIdentity'
@@ -95,7 +112,9 @@ module apiUserAssignedIdentity './core/identity/userAssignedIdentity.bicep' = {
   params: {
     location: location
     tags: tags
-    identityName: !empty(apiUserAssignedIdentityName) ? apiUserAssignedIdentityName : '${abbrs.managedIdentityUserAssignedIdentities}api-${resourceToken}'
+    identityName: !empty(apiUserAssignedIdentityName)
+      ? apiUserAssignedIdentityName
+      : '${abbrs.managedIdentityUserAssignedIdentities}api-${resourceToken}'
   }
 }
 
@@ -130,6 +149,7 @@ module api './app/api.bicep' = {
     identityId: apiUserAssignedIdentity.outputs.identityId
     identityClientId: apiUserAssignedIdentity.outputs.identityClientId
     appSettings: {
+      APPLICATION_UAMI: apimService.outputs.entraAppUserAssignedIdentityClientId
     }
     virtualNetworkSubnetId: !vnetEnabled ? '' : serviceVirtualNetwork.outputs.appSubnetID
   }
@@ -143,11 +163,13 @@ module storage './core/storage/storage-account.bicep' = {
     name: !empty(storageAccountName) ? storageAccountName : '${abbrs.storageStorageAccounts}${resourceToken}'
     location: location
     tags: tags
-    containers: [{name: deploymentStorageContainerName}, {name: 'snippets'}]
+    containers: [{ name: deploymentStorageContainerName }, { name: 'snippets' }]
     publicNetworkAccess: vnetEnabled ? 'Disabled' : 'Enabled'
-    networkAcls: !vnetEnabled ? {} : {
-      defaultAction: 'Deny'
-    }
+    networkAcls: !vnetEnabled
+      ? {}
+      : {
+          defaultAction: 'Deny'
+        }
   }
 }
 
@@ -177,7 +199,7 @@ module queueRoleAssignmentApi 'app/storage-Access.bicep' = {
 }
 
 // Virtual Network & private endpoint to blob storage
-module serviceVirtualNetwork 'app/vnet.bicep' =  if (vnetEnabled) {
+module serviceVirtualNetwork 'app/vnet.bicep' = if (vnetEnabled) {
   name: 'serviceVirtualNetwork'
   scope: rg
   params: {
@@ -206,9 +228,13 @@ module monitoring './core/monitor/monitoring.bicep' = {
   params: {
     location: location
     tags: tags
-    logAnalyticsName: !empty(logAnalyticsName) ? logAnalyticsName : '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
-    applicationInsightsName: !empty(applicationInsightsName) ? applicationInsightsName : '${abbrs.insightsComponents}${resourceToken}'
-    disableLocalAuth: disableLocalAuth  
+    logAnalyticsName: !empty(logAnalyticsName)
+      ? logAnalyticsName
+      : '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
+    applicationInsightsName: !empty(applicationInsightsName)
+      ? applicationInsightsName
+      : '${abbrs.insightsComponents}${resourceToken}'
+    disableLocalAuth: disableLocalAuth
   }
 }
 
@@ -225,12 +251,10 @@ module appInsightsRoleAssignmentApi './core/monitor/appinsights-access.bicep' = 
   }
 }
 
-
-
 // App outputs
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.applicationInsightsConnectionString
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
 output SERVICE_API_NAME string = api.outputs.SERVICE_API_NAME
 output AZURE_FUNCTION_NAME string = api.outputs.SERVICE_API_NAME
-output SERVICE_API_ENDPOINTS array = [ '${apimService.outputs.gatewayUrl}/mcp/sse' ]
+output SERVICE_API_ENDPOINTS array = ['${apimService.outputs.gatewayUrl}/mcp/sse']
