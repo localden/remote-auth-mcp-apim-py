@@ -59,7 +59,7 @@ def get_graph_user_details(context) -> str:
     try:
         logging.info(f"Context type: {type(context).__name__}")        # Get token for Microsoft Graph API
         try:
-            result = app.acquire_token_for_client(['User.Read'])
+            result = cca_auth_client.acquire_token_for_client(['https://graph.microsoft.com/.default'])
             if "access_token" in result:
                 logging.info("Successfully acquired access token")
                 token_acquired = True
