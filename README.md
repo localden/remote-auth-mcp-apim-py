@@ -42,3 +42,10 @@ Follow these steps to get started.
 
 >[!IMPORTANT]
 >Deploying this project will incur Azure cost. If you are deploying for testing and experimentation, make sure to delete the created resource group after testing.
+
+## Deploying the project to Azure
+
+When you run `azd up`, resources declared in the [`infra`](https://github.com/localden/remote-auth-mcp-apim-py/tree/main/infra) directory will be provisioned in your Azure account. You can go through the existing Bicep files to see what infrastructure will be automatically deployed.
+
+![GIF showing the deployment of Azure resources with Azure Developer CLI](./media/deploy-azd.gif)
+
