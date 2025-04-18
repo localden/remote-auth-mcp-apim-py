@@ -9,8 +9,8 @@ param storageAccountName string
 param virtualNetworkSubnetId string = ''
 @allowed(['SystemAssigned', 'UserAssigned'])
 param identityType string
-@description('User assigned identity name')
-param identityId string
+@description('User assigned identity names or IDs')
+param identityIds array = []
 
 // Runtime Properties
 @allowed([
@@ -38,9 +38,7 @@ resource functions 'Microsoft.Web/sites@2023-12-01' = {
   kind: kind
   identity: {
     type: identityType
-    userAssignedIdentities: { 
-      '${identityId}': {}
-    }
+    userAssignedIdentities: identityType == 'UserAssigned' ? union(reduce(identityIds, {}, (cur, id) => union(cur, { '${id}': {} })), {}) : null
   }
   properties: {
     serverFarmId: appServicePlanId
@@ -51,7 +49,7 @@ resource functions 'Microsoft.Web/sites@2023-12-01' = {
           value: '${stg.properties.primaryEndpoints.blob}${deploymentStorageContainerName}'
           authentication: {
             type: identityType == 'SystemAssigned' ? 'SystemAssignedIdentity' : 'UserAssignedIdentity'
-            userAssignedIdentityResourceId: identityType == 'UserAssigned' ? identityId : '' 
+            userAssignedIdentityResourceId: identityType == 'UserAssigned' ? (!empty(identityIds) ? identityIds[0] : '') : '' 
           }
         }
       }
