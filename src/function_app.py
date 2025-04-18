@@ -45,20 +45,21 @@ cca_auth_client = msal.ConfidentialClientApplication(
 )
 def get_graph_user_details(context) -> str:
     """
-    A function that simply returns the context for debugging purposes.
-
+    Gets user details from Microsoft Graph using the bearer token.
+    
     Args:
         context: The trigger context as a JSON string containing the request information.
-
+        
     Returns:
-        str: The full context as JSON for inspection.
-    """   
+        str: JSON containing the user details from Microsoft Graph.
+    """
     
     token_error = None
+    user_data = None
     
     try:
         logging.info(f"Context type: {type(context).__name__}")
-          # Parse context to get the bearer token
+        # Parse context to get the bearer token
         try:
             context_obj = json.loads(context)
             # Navigate through nested structure to find bearerToken in arguments
@@ -74,7 +75,6 @@ def get_graph_user_details(context) -> str:
             if not bearer_token:
                 logging.warning("No bearer token found in context arguments")
                 token_acquired = False
-                access_token = None
                 token_error = "No bearer token found in context arguments"
             else:
                 # Use On-Behalf-Of flow with the user's token
@@ -88,52 +88,59 @@ def get_graph_user_details(context) -> str:
                     token_acquired = True
                     access_token = result["access_token"]
                     token_error = None
+                    
+                    # Use the token to call Microsoft Graph API
+                    try:
+                        # Create an authentication object for Microsoft Graph
+                        headers = {
+                            'Authorization': f'Bearer {access_token}',
+                            'Content-Type': 'application/json'
+                        }
+                        
+                        # Get the user profile information
+                        graph_url = 'https://graph.microsoft.com/v1.0/me'
+                        response = requests.get(graph_url, headers=headers)
+                        
+                        if response.status_code == 200:
+                            user_data = response.json()
+                            logging.info("Successfully retrieved user data from Microsoft Graph")
+                        else:
+                            logging.error(f"Failed to get user data: {response.status_code}, {response.text}")
+                            token_error = f"Graph API error: {response.status_code}"
+                    except Exception as graph_error:
+                        logging.error(f"Error calling Graph API: {str(graph_error)}")
+                        token_error = f"Graph API error: {str(graph_error)}"
                 else:
                     token_acquired = False
-                    access_token = None
                     token_error = result.get('error_description', 'Unknown error acquiring token')
                     logging.warning(f"Failed to acquire token using OBO flow: {token_error}")
         except Exception as e:
             token_acquired = False
-            access_token = None
             token_error = str(e)
             logging.error(f"Exception when acquiring token: {token_error}")
 
+        # Prepare the response
         try:
-            context_obj = json.loads(context)            # Add the Azure application details to the response
-            context_obj['application_uami'] = application_uami
-            context_obj['application_cid'] = application_cid
-            context_obj['application_tenant'] = application_tenant
-
-            # Add the token information
-            context_obj['token_acquired'] = token_acquired
-            if token_acquired:
-                context_obj['access_token'] = access_token
+            response = {}
+            
+            if user_data:
+                # Return user data as the primary content
+                response = user_data
+                # Add status information
+                response['success'] = True
             else:
-                context_obj['token_error'] = token_error
+                # If we failed to get user data, return error information
+                response['success'] = False
+                response['error'] = token_error or "Failed to retrieve user data"
             
-            logging.info(f"Received context object: {json.dumps(context_obj)[:500]}...")
-            return json.dumps(context_obj, indent=2)
-        except json.JSONDecodeError:
-            logging.info("Context is not valid JSON, returning as is")
-            # For non-JSON context, we'll need to return a JSON object instead            
-            response = {
-                "original_context": context, 
-                "application_uami": application_uami,
-                "application_cid": application_cid,
-                "application_tenant": application_tenant,
-                "token_acquired": token_acquired
-            }
-            
-            if token_acquired:
-                response['access_token'] = access_token
-            else:
-                response['token_error'] = token_error
-            
+            logging.info(f"Returning response: {json.dumps(response)[:500]}...")
             return json.dumps(response, indent=2)
-        
-        logging.info(f"Received context object: {str(context)[:500]}...")
-        return json.dumps(context, indent=2, default=str)
+        except Exception as format_error:
+            logging.error(f"Error formatting response: {str(format_error)}")
+            return json.dumps({
+                "success": False,
+                "error": f"Error formatting response: {str(format_error)}"
+            }, indent=2)
     except Exception as e:
         stack_trace = traceback.format_exc()
         return json.dumps({
