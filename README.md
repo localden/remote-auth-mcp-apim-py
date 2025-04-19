@@ -82,13 +82,29 @@ Once you consent, you will be returned back to the Model Context Protocol Inspec
 
 ![Connected MCP server in MCP Inspector](./media/connected-mcp-server.png)
 
-Once connected, click on **List Tools** and select `get_graph_user_data`. This will enable you to get data about the currently authenticated user from Microsoft Graph. Click **Run Tool**.
+Once connected, click on **List Tools** and select `get_graph_user_details`. This will enable you to get data about the currently authenticated user from Microsoft Graph. Click **Run Tool**.
 
-<!-- GIF -->
+![List tools in MCP Inspector and trigger the one that returns user details from Graph](./media/list-tools.gif)
 
-If all goes well, you will see your user data in the response block.
+If all goes well, you will see your user data in the response block, like this:
 
-<!-- IMAGE -->
+```json
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users/$entity",
+  "businessPhones": [],
+  "displayName": "Den Delimarsky (DEVDIV)",
+  "givenName": null,
+  "jobTitle": null,
+  "mail": "Den.Delimarsky@microsoft.com",
+  "mobilePhone": null,
+  "officeLocation": null,
+  "preferredLanguage": null,
+  "surname": null,
+  "userPrincipalName": "Den.Delimarsky_microsoft.com#EXT#@contosojukasper.onmicrosoft.com",
+  "id": "7eef692a-b9a0-4f25-a1b6-f0d11d3e4180",
+  "success": true
+}
+```
 
 ## Feedback and reporting issues
 
