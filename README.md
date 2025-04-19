@@ -80,7 +80,7 @@ You will be prompted to authenticate with the credentials **in the tenant in whi
 
 Once you consent, you will be returned back to the Model Context Protocol Inspector landing page. Wait a few seconds until the connection is established - you will see a green **Connected** label on the page.
 
-<!-- IMAGE -->
+![Connected MCP server in MCP Inspector](./media/connected-mcp-server.png)
 
 Once connected, click on **List Tools** and select `get_graph_user_data`. This will enable you to get data about the currently authenticated user from Microsoft Graph. Click **Run Tool**.
 
