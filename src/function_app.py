@@ -5,6 +5,8 @@ import os
 import requests
 import msal
 import traceback
+import jwt
+from jwt.exceptions import PyJWTError
 
 import azure.functions as func
 from msgraph import GraphServiceClient
@@ -29,6 +31,130 @@ def get_managed_identity_token(audience):
         return token["access_token"]
     else:
         raise Exception(f"Failed to acquire token: {token.get('error_description', 'Unknown error')}")
+
+def get_jwks_key(token):
+    """
+    Fetches the JSON Web Key from Azure AD for token signature validation.
+    
+    Args:
+        token: The JWT token to validate
+        
+    Returns:
+        tuple: (signing_key, error_message)
+            - signing_key: The public key to verify the token, or None if retrieval failed
+            - error_message: Detailed error message if retrieval failed, None otherwise
+    """
+    try:
+        # Get the kid and issuer from the token
+        try:
+            header = jwt.get_unverified_header(token)
+            if not header:
+                return None, "Failed to parse JWT header"
+        except Exception as e:
+            return None, f"Invalid JWT header format: {str(e)}"
+            
+        kid = header.get('kid')
+        if not kid:
+            return None, "JWT header missing 'kid' (Key ID) claim"
+        
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            if not payload:
+                return None, "Failed to decode JWT payload"
+        except Exception as e:
+            return None, f"Invalid JWT payload format: {str(e)}"        
+        
+        issuer = payload.get('iss')
+        if not issuer:
+            return None, "JWT payload missing 'iss' (Issuer) claim"
+        
+        # Check that the issuer exactly matches the expected format
+        expected_issuer = f"https://sts.windows.net/{application_tenant}/"
+        if issuer != expected_issuer:
+            return None, f"JWT issuer '{issuer}' does not match expected issuer '{expected_issuer}'"
+            
+        # Get the JWKS URI
+        jwks_uri = f"https://login.microsoftonline.com/{application_tenant}/discovery/v2.0/keys"
+        try:
+            resp = requests.get(jwks_uri, timeout=10)
+            if resp.status_code != 200:
+                return None, f"Failed to fetch JWKS: HTTP {resp.status_code} - {resp.text[:100]}"
+                
+            jwks = resp.json()
+            if not jwks or 'keys' not in jwks or not jwks['keys']:
+                return None, "JWKS response is empty or missing 'keys' array"
+        except requests.RequestException as e:
+            return None, f"Network error fetching JWKS: {str(e)}"
+        except json.JSONDecodeError as e:
+            return None, f"Invalid JWKS response format: {str(e)}"
+        
+        # Find the signing key in the JWKS
+        signing_key = None
+        for key in jwks['keys']:
+            if key.get('kid') == kid:
+                try:
+                    signing_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key))
+                    break
+                except Exception as e:
+                    return None, f"Failed to parse JWK for kid='{kid}': {str(e)}"
+                
+        if not signing_key:
+            return None, f"No matching key found in JWKS for kid='{kid}'"
+            
+        return signing_key, None
+    except Exception as e:
+        return None, f"Unexpected error getting JWKS key: {str(e)}"
+
+def validate_bearer_token(bearer_token, expected_audience):
+    """
+    Validates a JWT bearer token against the expected audience and verifies its signature.
+    
+    Args:
+        bearer_token: The JWT token to validate
+        expected_audience: The expected audience value
+        
+    Returns:
+        tuple: (is_valid, error_message, decoded_token)
+            - is_valid: boolean indicating if the token is valid
+            - error_message: error message if validation failed, None otherwise
+            - decoded_token: the decoded token if validation succeeded, None otherwise
+    """
+    if not bearer_token:
+        return False, "No bearer token provided", None
+    
+    try:
+        logging.info(f"Validating JWT token against audience: {expected_audience}")
+        
+        signing_key, key_error = get_jwks_key(bearer_token)
+        if not signing_key:
+            return False, f"JWT key retrieval failed: {key_error}", None
+        
+        # Validate the token with full verification
+        try:
+            decoded_token = jwt.decode(
+                bearer_token,
+                signing_key,
+                algorithms=['RS256'],
+                audience=expected_audience,
+                options={"verify_aud": True}
+            )
+            
+            logging.info(f"JWT token successfully validated. Token contains claims for subject: {decoded_token.get('sub', 'unknown')}")
+            return True, None, decoded_token
+        except jwt.exceptions.InvalidAudienceError:
+            return False, f"JWT has an invalid audience. Expected: {expected_audience}", None
+        except jwt.exceptions.ExpiredSignatureError:
+            return False, "JWT token has expired", None
+        except jwt.exceptions.InvalidSignatureError:
+            return False, "JWT has an invalid signature", None
+        except PyJWTError as jwt_error:
+            error_message = f"JWT validation failed: {str(jwt_error)}"
+            logging.error(f"JWT validation error: {error_message}")
+            return False, error_message, None
+    except Exception as e:
+        error_message = f"Unexpected error during JWT validation: {str(e)}"
+        logging.error(error_message)
+        return False, error_message, None
 
 cca_auth_client = msal.ConfidentialClientApplication(
     application_cid, 
@@ -65,8 +191,7 @@ def get_graph_user_details(context) -> str:
             # Navigate through nested structure to find bearerToken in arguments
             arguments = context_obj.get('arguments', {})
             bearer_token = None
-            
-            # Log the arguments structure for debugging
+              # Log the arguments structure for debugging
             logging.info(f"Arguments structure: {json.dumps(arguments)[:500]}")
             
             if isinstance(arguments, dict):
@@ -77,11 +202,20 @@ def get_graph_user_details(context) -> str:
                 token_acquired = False
                 token_error = "No bearer token found in context arguments"
             else:
-                # Use On-Behalf-Of flow with the user's token
-                result = cca_auth_client.acquire_token_on_behalf_of(
-                    user_assertion=bearer_token,
-                    scopes=['https://graph.microsoft.com/.default']
-                )
+                # Validate the JWT token using the dedicated function
+                expected_audience = f"api://{application_cid}"
+                is_valid, validation_error, decoded_token = validate_bearer_token(bearer_token, expected_audience)
+                
+                if is_valid:
+                    # Use On-Behalf-Of flow with the validated user's token
+                    result = cca_auth_client.acquire_token_on_behalf_of(
+                        user_assertion=bearer_token,
+                        scopes=['https://graph.microsoft.com/.default']
+                    )
+                else:
+                    token_acquired = False
+                    token_error = validation_error
+                    result = {"error": "invalid_token", "error_description": validation_error}
                 
                 if "access_token" in result:
                     logging.info("Successfully acquired access token using OBO flow")
