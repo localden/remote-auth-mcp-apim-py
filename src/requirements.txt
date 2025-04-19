@@ -4,7 +4,5 @@
 
 azure-functions
 requests
-msgraph-sdk
 msal
 PyJWT
-cryptography

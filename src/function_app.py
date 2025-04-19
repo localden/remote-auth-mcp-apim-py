@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import json
 import logging
 import os
@@ -9,8 +8,6 @@ import jwt
 from jwt.exceptions import PyJWTError
 
 import azure.functions as func
-from msgraph import GraphServiceClient
-from kiota_authentication_azure.azure_identity_authentication_provider import AzureIdentityAuthenticationProvider
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
