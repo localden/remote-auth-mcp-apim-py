@@ -265,12 +265,3 @@ def get_graph_user_details(context) -> str:
             "stack_trace": stack_trace,
             "raw_context": str(context)
         }, indent=2)
-
-def get_managed_identity_token(audience):
-    token = mi_auth_client.acquire_token_for_client(resource=audience)
-
-    if "access_token" in token:
-        return token["access_token"]
-    else:
-        raise Exception(f"Failed to acquire token: {token.get('error_description', 'Unknown error')}")
-
