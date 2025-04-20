@@ -50,7 +50,7 @@ resource entraResourceAppWithSettings 'Microsoft.Graph/applications@v1.0' = {
       resourceAppId: '00000003-0000-0000-c000-000000000000' // Microsoft Graph
       resourceAccess: [
         {
-          id: 'e1fe6dd8-ba31-4d61-89e7-88639da4683d' // Replace with the actual scope ID for mcp.server
+          id: 'e1fe6dd8-ba31-4d61-89e7-88639da4683d'
           type: 'Scope'
         }
       ]
