@@ -74,8 +74,8 @@
         <!-- STEP 4: Construct the Entra ID authorization URL -->
         <!-- Base URL for Entra ID authorization endpoint -->
         <set-variable name="baseAuthUrl" value="https://login.microsoftonline.com/{{EntraIDTenantId}}/oauth2/v2.0/authorize?response_type=code" />
-        <!-- Add client ID parameter -->
-        <set-variable name="clientIdParam" value="@(string.Concat("&client_id=", context.Variables.GetValueOrDefault("clientId", "")))" />        
+        <!-- Add client ID parameter - using EntraIDClientId instead of the request client ID -->
+        <set-variable name="clientIdParam" value="@("&client_id={{EntraIDClientId}}")" />        
         <!-- Add PKCE parameters -->
         <set-variable name="codeChallengeParam" value="@(string.Concat("&code_challenge=", context.Variables.GetValueOrDefault("codeChallenge", "")))" />
         <set-variable name="codeChallengeMethodParam" value="@(string.Concat("&code_challenge_method=", context.Variables.GetValueOrDefault("codeChallengeMethod", "")))" />
