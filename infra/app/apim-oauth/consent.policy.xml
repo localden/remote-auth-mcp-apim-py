@@ -188,7 +188,7 @@
                                         try {
                                             // Extract and parse the cookie value
                                             string cookieValue = trimmedCookie.Substring(cookieName.Length + 1);
-                                            // Get the payload part (after the first dot if cookie is signed)
+                                            // Get the payload part (before the first dot if cookie is signed)
                                             string payload = cookieValue.Contains('.') ? 
                                                 cookieValue.Split('.')[0] : cookieValue;
                                             string decodedValue = System.Text.Encoding.UTF8.GetString(
@@ -246,11 +246,45 @@
                         <set-variable name="response_cache_control" value="no-store, no-cache" />
                         <set-variable name="response_pragma" value="no-cache" />
                         
-                        <!-- Calculate the cookie value right here in inbound before returning response -->
-                        <set-variable name="denial_cookie" value="@{
+                        <!-- Calculate the cookie value right here in inbound before returning response -->                        <set-variable name="denial_cookie" value="@{
                             string cookieName = "MCP_DENIED_CLIENTS";
-                            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                            string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                            
+                            // Extract client_id and redirect_uri directly from the POST form data
+                            string clientId = "";
+                            string redirectUri = "";
+                            
+                            // Get form data to extract parameters
+                            string body = context.Request.Body.As<string>(preserveContent: true);
+                            string[] pairs = body.Split('&');
+                            foreach (string pair in pairs)
+                            {
+                                string[] keyValue = pair.Split('=');
+                                if (keyValue.Length == 2)
+                                {
+                                    if (keyValue[0] == "client_id")
+                                    {
+                                        clientId = System.Net.WebUtility.UrlDecode(keyValue[1]);
+                                    }
+                                    else if (keyValue[0] == "redirect_uri")
+                                    {
+                                        redirectUri = System.Net.WebUtility.UrlDecode(keyValue[1]);
+                                    }
+                                }
+                            }
+                            
+                            // If we couldn't get values from the form, fall back to context variables
+                            if (string.IsNullOrEmpty(clientId))
+                            {
+                                clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                            }
+                            
+                            if (string.IsNullOrEmpty(redirectUri))
+                            {
+                                redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                            }
+                            
+                            // Log for diagnosis
+                            context.Trace($"Setting denial cookie for client_id: {clientId}, redirect_uri: {redirectUri}");
                             
                             // Create a unique identifier for this client/redirect combination
                             string clientKey = $"{clientId}:{redirectUri}";
@@ -268,7 +302,7 @@
                                         try {
                                             // Extract and parse the cookie value
                                             string cookieValue = trimmedCookie.Substring(cookieName.Length + 1);
-                                            // Get the payload part (after the first dot if cookie is signed)
+                                            // Get the payload part (before the first dot if cookie is signed)
                                             string payload = cookieValue.Contains('.') ? 
                                                 cookieValue.Split('.')[0] : cookieValue;
                                             string decodedValue = System.Text.Encoding.UTF8.GetString(
@@ -726,9 +760,9 @@
                                     try {
                                         // Extract and parse the cookie value
                                         string cookieValue = trimmedCookie.Substring(cookieName.Length + 1);
-                                        // Get the payload part (after the first dot if cookie is signed)
+                                        // Get the payload part (before the first dot if cookie is signed)
                                         string payload = cookieValue.Contains('.') ? 
-                                            cookieValue.Split('.')[1] : cookieValue;
+                                            cookieValue.Split('.')[0] : cookieValue;
                                         string decodedValue = System.Text.Encoding.UTF8.GetString(
                                             System.Convert.FromBase64String(payload));
                                         approvedClients = JArray.Parse(decodedValue);
@@ -795,9 +829,9 @@
                                     try {
                                         // Extract and parse the cookie value
                                         string cookieValue = trimmedCookie.Substring(cookieName.Length + 1);
-                                        // Get the payload part (after the first dot if cookie is signed)
+                                        // Get the payload part (before the first dot if cookie is signed)
                                         string payload = cookieValue.Contains('.') ? 
-                                            cookieValue.Split('.')[1] : cookieValue;
+                                            cookieValue.Split('.')[0] : cookieValue;
                                         string decodedValue = System.Text.Encoding.UTF8.GetString(
                                             System.Convert.FromBase64String(payload));
                                         deniedClients = JArray.Parse(decodedValue);
@@ -832,19 +866,6 @@
                         return $"{cookieName}={encodedClients}; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax";
                     }</value>
                 </set-header>
-                
-                <!-- Set response details for denial page -->
-                <set-status code="@(context.Variables.GetValueOrDefault<int>("response_status_code", 403))" reason="Forbidden" />
-                <set-header name="Content-Type" exists-action="override">
-                    <value>@(context.Variables.GetValueOrDefault<string>("response_content_type", "text/html"))</value>
-                </set-header>
-                <set-header name="Cache-Control" exists-action="override">
-                    <value>@(context.Variables.GetValueOrDefault<string>("response_cache_control", "no-store, no-cache"))</value>
-                </set-header>
-                <set-header name="Pragma" exists-action="override">
-                    <value>@(context.Variables.GetValueOrDefault<string>("response_pragma", "no-cache"))</value>
-                </set-header>
-                <set-body>@(context.Variables.GetValueOrDefault<string>("response_body", ""))</set-body>
             </when>
         </choose>
     </outbound>
