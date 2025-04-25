@@ -93,149 +93,114 @@
         }" />
         
         <!-- If this is a form submission, process the consent choice -->
-        <choose>
-            <when condition="@(context.Request.Method == "POST")">
-                <choose>                      <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
-                        <!-- Set improved consent cookie that maintains a list of approved clients -->
-                        <set-header name="Set-Cookie" exists-action="append">
-                            <value>@{
-                                string APPROVED_COOKIE_NAME = "MCP_APPROVED_CLIENTS";
-                                string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                                string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
-                                
-                                // Create a unique identifier for this client/redirect combination
-                                string clientKey = $"{clientId}:{redirectUri}";
-                                
-                                // Check for existing cookie
-                                var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
-                                JArray approvedClients = new JArray();
-                                
-                                if (!string.IsNullOrEmpty(cookieHeader)) {
-                                    // Parse cookies to find our approval cookie
-                                    string[] cookies = cookieHeader.Split(';');
-                                    foreach (string cookie in cookies) {
-                                        string trimmedCookie = cookie.Trim();
-                                        if (trimmedCookie.StartsWith(APPROVED_COOKIE_NAME + "=")) {
-                                            try {
-                                                // Extract and parse the cookie value
-                                                string cookieValue = trimmedCookie.Substring(APPROVED_COOKIE_NAME.Length + 1);
-                                                // Get the payload part (after the first dot if cookie is signed)
-                                                string payload = cookieValue.Contains('.') ? 
-                                                    cookieValue.Split('.')[1] : cookieValue;
-                                                string decodedValue = System.Text.Encoding.UTF8.GetString(
-                                                    System.Convert.FromBase64String(payload));
-                                                approvedClients = JArray.Parse(decodedValue);
-                                            } catch (Exception) {
-                                                // If parsing fails, we'll just create a new cookie
-                                                approvedClients = new JArray();
-                                            }
-                                            break;
-                                        }
-                                    }
-                                }
-                                
-                                // Add the current client if not already in the list
-                                bool clientExists = false;
-                                foreach (var item in approvedClients) {
-                                    if (item.ToString() == clientKey) {
-                                        clientExists = true;
-                                        break;
-                                    }
-                                }
-                                
-                                if (!clientExists) {
-                                    approvedClients.Add(clientKey);
-                                }
-                                
-                                // Base64 encode the client list
-                                string jsonClients = approvedClients.ToString(Newtonsoft.Json.Formatting.None);
-                                string encodedClients = System.Convert.ToBase64String(
-                                    System.Text.Encoding.UTF8.GetBytes(jsonClients));
-                                
-                                // In a production environment, you'd want to sign this value with HMAC
-                                // For now, we'll use a simpler format without signing
-                                return $"{APPROVED_COOKIE_NAME}={encodedClients}; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax";
-                            }</value>
-                        </set-header>
+        <choose>            <when condition="@(context.Request.Method == "POST")">
+                <choose>                    <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
+                        <!-- Process consent approval: Store information for outbound cookie processing -->
+                        <set-variable name="response_status_code" value="302" />
+                        <set-variable name="response_redirect_location" value="@{
+                            string baseUrl = "{{APIMGatewayURL}}";
+                            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                            string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                            string state = context.Variables.GetValueOrDefault<string>("state", "");
+                            
+                            return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={System.Net.WebUtility.UrlEncode(redirectUri)}&state={state}&consent=granted";
+                        }" />
                         
-                        <!-- Redirect back to authorization flow -->
+                        <!-- Mark this as an approval for outbound processing -->
+                        <set-variable name="consent_approved" value="true" />
+                        <set-variable name="cookie_name" value="MCP_APPROVED_CLIENTS" />
+                        
+                        <!-- Return-response without response-variable-name to properly pass to outbound -->
                         <return-response>
                             <set-status code="302" reason="Found" />
                             <set-header name="Location" exists-action="override">
-                                <value>@{
-                                    string baseUrl = "{{APIMGatewayURL}}";
-                                    string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                                    string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
-                                    string state = context.Variables.GetValueOrDefault<string>("state", "");
-                                    
-                                    return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={System.Net.WebUtility.UrlEncode(redirectUri)}&state={state}&consent=granted";
-                                }</value>
+                                <value>@(context.Variables.GetValueOrDefault<string>("response_redirect_location", ""))</value>
                             </set-header>
                         </return-response>
-                    </when>                      <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "deny")">
-                        <!-- Set improved consent denial cookie that maintains a list of denied clients -->
-                        <set-header name="Set-Cookie" exists-action="append">
-                            <value>@{
-                                string DENIED_COOKIE_NAME = "MCP_DENIED_CLIENTS";
-                                string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                                string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
-                                
-                                // Create a unique identifier for this client/redirect combination
-                                string clientKey = $"{clientId}:{redirectUri}";
-                                
-                                // Check for existing cookie
-                                var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
-                                JArray deniedClients = new JArray();
-                                
-                                if (!string.IsNullOrEmpty(cookieHeader)) {
-                                    // Parse cookies to find our denial cookie
-                                    string[] cookies = cookieHeader.Split(';');
-                                    foreach (string cookie in cookies) {
-                                        string trimmedCookie = cookie.Trim();
-                                        if (trimmedCookie.StartsWith(DENIED_COOKIE_NAME + "=")) {
-                                            try {
-                                                // Extract and parse the cookie value
-                                                string cookieValue = trimmedCookie.Substring(DENIED_COOKIE_NAME.Length + 1);
-                                                // Get the payload part (after the first dot if cookie is signed)
-                                                string payload = cookieValue.Contains('.') ? 
-                                                    cookieValue.Split('.')[1] : cookieValue;
-                                                string decodedValue = System.Text.Encoding.UTF8.GetString(
-                                                    System.Convert.FromBase64String(payload));
-                                                deniedClients = JArray.Parse(decodedValue);
-                                            } catch (Exception) {
-                                                // If parsing fails, we'll just create a new cookie
-                                                deniedClients = new JArray();
-                                            }
-                                            break;
-                                        }
-                                    }
-                                }
-                                
-                                // Add the current client if not already in the list
-                                bool clientExists = false;
-                                foreach (var item in deniedClients) {
-                                    if (item.ToString() == clientKey) {
-                                        clientExists = true;
-                                        break;
-                                    }
-                                }
-                                
-                                if (!clientExists) {
-                                    deniedClients.Add(clientKey);
-                                }
-                                
-                                // Base64 encode the client list
-                                string jsonClients = deniedClients.ToString(Newtonsoft.Json.Formatting.None);
-                                string encodedClients = System.Convert.ToBase64String(
-                                    System.Text.Encoding.UTF8.GetBytes(jsonClients));
-                                
-                                // In a production environment, you'd want to sign this value with HMAC
-                                // For now, we'll use a simpler format without signing
-                                return $"{DENIED_COOKIE_NAME}={encodedClients}; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax";
-                            }</value>
-                        </set-header>
+                    </when>                    <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "deny")">
+                        <!-- Process consent denial: Store information for outbound cookie processing -->
+                        <set-variable name="response_status_code" value="403" />
+                        <set-variable name="response_content_type" value="text/html" />
+                        <set-variable name="response_cache_control" value="no-store, no-cache" />
+                        <set-variable name="response_pragma" value="no-cache" />
                         
-                        <!-- Return a proper access denied page -->
+                        <!-- Mark this as a denial for outbound processing -->
+                        <set-variable name="consent_denied" value="true" />
+                        <set-variable name="cookie_name" value="MCP_DENIED_CLIENTS" />
+                        
+                        <!-- Store the HTML content for the access denied page -->
+                        <set-variable name="response_body" value="@{
+                            return @"<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Access Denied</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            text-align: center;
+        }
+        .container {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 30px;
+            margin-top: 50px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #d83b01;
+            margin-bottom: 20px;
+        }
+        .message {
+            margin: 20px 0;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+            background-color: #0078d4;
+            color: white;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <h1>Access Denied</h1>
+        <div class='message'>
+            <p>You have denied access to the application.</p>
+            <p>The application will not be able to access your account or data.</p>
+        </div>
+        <p>You can close this window safely.</p>
+    </div>
+</body>
+</html>";
+                        }" />
+                        
+                        <!-- Return-response without response-variable-name to properly pass to outbound -->
+                        <return-response>
+                            <set-status code="403" reason="Forbidden" />
+                            <set-header name="Content-Type" exists-action="override">
+                                <value>text/html</value>
+                            </set-header>
+                            <set-header name="Cache-Control" exists-action="override">
+                                <value>no-store, no-cache</value>
+                            </set-header>
+                            <set-header name="Pragma" exists-action="override">
+                                <value>no-cache</value>
+                            </set-header>
+                            <set-body>@(context.Variables.GetValueOrDefault<string>("response_body", ""))</set-body>
+                        </return-response></when>
+                    <otherwise>
                         <return-response>
                             <set-status code="403" reason="Forbidden" />
                             <set-header name="Content-Type" exists-action="override">
@@ -305,7 +270,8 @@
 </html>";
                             }</set-body>
                         </return-response>
-                    </when>                </choose>            </when>
+                    </otherwise>
+                </choose></when>
             <!-- For GET requests, check for denial cookie first, then display consent page if no cookie found -->
             <otherwise>
                 <!-- If there's a denial cookie, return access denied page immediately -->
@@ -519,9 +485,162 @@
     </inbound>
     <backend>
         <base />
-    </backend>
-    <outbound>
+    </backend>    <outbound>
         <base />
+        <!-- Debug trace to verify variables are preserved -->
+        <trace source="outbound-debug" severity="information">
+            <message>@{
+                return $"Outbound policy: consent_approved={context.Variables.GetValueOrDefault<bool>("consent_approved")}, consent_denied={context.Variables.GetValueOrDefault<bool>("consent_denied")}, cookie_name={context.Variables.GetValueOrDefault<string>("cookie_name")}";
+            }</message>
+        </trace>
+        
+        <!-- Set cookies and finalize the response based on context variables -->
+        <choose>
+            <!-- Process approval cookie if approval was granted -->
+            <when condition="@(context.Variables.GetValueOrDefault<bool>("consent_approved"))">
+                <set-header name="Set-Cookie" exists-action="append">
+                    <value>@{
+                        string cookieName = context.Variables.GetValueOrDefault<string>("cookie_name", "MCP_APPROVED_CLIENTS");
+                        string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                        string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                        
+                        // Create a unique identifier for this client/redirect combination
+                        string clientKey = $"{clientId}:{redirectUri}";
+                        
+                        // Check for existing cookie
+                        var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
+                        JArray approvedClients = new JArray();
+                        
+                        if (!string.IsNullOrEmpty(cookieHeader)) {
+                            // Parse cookies to find our approval cookie
+                            string[] cookies = cookieHeader.Split(';');
+                            foreach (string cookie in cookies) {
+                                string trimmedCookie = cookie.Trim();
+                                if (trimmedCookie.StartsWith(cookieName + "=")) {
+                                    try {
+                                        // Extract and parse the cookie value
+                                        string cookieValue = trimmedCookie.Substring(cookieName.Length + 1);
+                                        // Get the payload part (after the first dot if cookie is signed)
+                                        string payload = cookieValue.Contains('.') ? 
+                                            cookieValue.Split('.')[1] : cookieValue;
+                                        string decodedValue = System.Text.Encoding.UTF8.GetString(
+                                            System.Convert.FromBase64String(payload));
+                                        approvedClients = JArray.Parse(decodedValue);
+                                    } catch (Exception) {
+                                        // If parsing fails, we'll just create a new cookie
+                                        approvedClients = new JArray();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Add the current client if not already in the list
+                        bool clientExists = false;
+                        foreach (var item in approvedClients) {
+                            if (item.ToString() == clientKey) {
+                                clientExists = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!clientExists) {
+                            approvedClients.Add(clientKey);
+                        }
+                        
+                        // Base64 encode the client list
+                        string jsonClients = approvedClients.ToString(Newtonsoft.Json.Formatting.None);
+                        string encodedClients = System.Convert.ToBase64String(
+                            System.Text.Encoding.UTF8.GetBytes(jsonClients));
+                        
+                        // Return the cookie with appropriate settings
+                        return $"{cookieName}={encodedClients}; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax";
+                    }</value>
+                </set-header>
+                
+                <!-- Set status code and redirect location for approval -->
+                <set-status code="@(context.Variables.GetValueOrDefault<int>("response_status_code", 302))" reason="Found" />
+                <set-header name="Location" exists-action="override">
+                    <value>@(context.Variables.GetValueOrDefault<string>("response_redirect_location", ""))</value>
+                </set-header>
+            </when>
+            
+            <!-- Process denial cookie if denial was chosen -->
+            <when condition="@(context.Variables.GetValueOrDefault<bool>("consent_denied"))">
+                <set-header name="Set-Cookie" exists-action="append">
+                    <value>@{
+                        string cookieName = context.Variables.GetValueOrDefault<string>("cookie_name", "MCP_DENIED_CLIENTS");
+                        string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                        string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                        
+                        // Create a unique identifier for this client/redirect combination
+                        string clientKey = $"{clientId}:{redirectUri}";
+                        
+                        // Check for existing cookie
+                        var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
+                        JArray deniedClients = new JArray();
+                        
+                        if (!string.IsNullOrEmpty(cookieHeader)) {
+                            // Parse cookies to find our denial cookie
+                            string[] cookies = cookieHeader.Split(';');
+                            foreach (string cookie in cookies) {
+                                string trimmedCookie = cookie.Trim();
+                                if (trimmedCookie.StartsWith(cookieName + "=")) {
+                                    try {
+                                        // Extract and parse the cookie value
+                                        string cookieValue = trimmedCookie.Substring(cookieName.Length + 1);
+                                        // Get the payload part (after the first dot if cookie is signed)
+                                        string payload = cookieValue.Contains('.') ? 
+                                            cookieValue.Split('.')[1] : cookieValue;
+                                        string decodedValue = System.Text.Encoding.UTF8.GetString(
+                                            System.Convert.FromBase64String(payload));
+                                        deniedClients = JArray.Parse(decodedValue);
+                                    } catch (Exception) {
+                                        // If parsing fails, we'll just create a new cookie
+                                        deniedClients = new JArray();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Add the current client if not already in the list
+                        bool clientExists = false;
+                        foreach (var item in deniedClients) {
+                            if (item.ToString() == clientKey) {
+                                clientExists = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!clientExists) {
+                            deniedClients.Add(clientKey);
+                        }
+                        
+                        // Base64 encode the client list
+                        string jsonClients = deniedClients.ToString(Newtonsoft.Json.Formatting.None);
+                        string encodedClients = System.Convert.ToBase64String(
+                            System.Text.Encoding.UTF8.GetBytes(jsonClients));
+                        
+                        // Return the cookie with appropriate settings
+                        return $"{cookieName}={encodedClients}; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax";
+                    }</value>
+                </set-header>
+                
+                <!-- Set response details for denial page -->
+                <set-status code="@(context.Variables.GetValueOrDefault<int>("response_status_code", 403))" reason="Forbidden" />
+                <set-header name="Content-Type" exists-action="override">
+                    <value>@(context.Variables.GetValueOrDefault<string>("response_content_type", "text/html"))</value>
+                </set-header>
+                <set-header name="Cache-Control" exists-action="override">
+                    <value>@(context.Variables.GetValueOrDefault<string>("response_cache_control", "no-store, no-cache"))</value>
+                </set-header>
+                <set-header name="Pragma" exists-action="override">
+                    <value>@(context.Variables.GetValueOrDefault<string>("response_pragma", "no-cache"))</value>
+                </set-header>
+                <set-body>@(context.Variables.GetValueOrDefault<string>("response_body", ""))</set-body>
+            </when>
+        </choose>
     </outbound>
     <on-error>
         <base />
