@@ -46,9 +46,12 @@
                 // Client secret expires in 1 year (31536000 seconds = 365 days)
                 long clientSecretExpiresAt = currentTimeSeconds + 31536000;
                 
+                // Generate a unique client ID (GUID)
+                string uniqueClientId = Guid.NewGuid().ToString();
+                
                 return new JObject
                 {
-                    ["client_id"] = "{{McpClientId}}",
+                    ["client_id"] = uniqueClientId,
                     ["client_id_issued_at"] = clientIdIssuedAt,
                     ["client_secret_expires_at"] = clientSecretExpiresAt,
                     ["redirect_uris"] = requestBody["redirect_uris"]?.ToObject<JArray>()

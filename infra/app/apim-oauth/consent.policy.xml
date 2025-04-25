@@ -1,0 +1,141 @@
+<!--
+    CONSENT POLICY
+    This policy handles the user consent process for dynamically registered clients.
+    
+    Flow:
+    1. Check if consent is already provided (via cookie)
+    2. If not, display consent page
+    3. Process user's consent choice
+    4. Store consent status and redirect to original flow
+-->
+<policies>
+    <inbound>
+        <base />
+        <!-- Extract parameters from request -->
+        <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
+        <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />
+        <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
+        <set-variable name="consent_action" value="@((string)context.Request.Body.As<JObject>(preserveContent: true)["consent_action"]?.ToString() ?? "")" />
+        
+        <!-- If this is a form submission, process the consent choice -->
+        <choose>
+            <when condition="@(context.Request.Method == "POST")">
+                <choose>
+                    <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
+                        <!-- Store consent status in cache -->
+                        <cache-store-value key="@($"ClientConsent-{context.Variables.GetValueOrDefault<string>("client_id")}")" 
+                                        value="granted" duration="31536000" />
+                        
+                        <!-- Set consent cookie -->
+                        <set-header name="Set-Cookie" exists-action="append">
+                            <value>@($"MCP_CLIENT_CONSENT_{context.Variables.GetValueOrDefault<string>("client_id")}=granted; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax")</value>
+                        </set-header>
+                        
+                        <!-- Redirect back to authorization flow -->
+                        <return-response>
+                            <set-status code="302" reason="Found" />
+                            <set-header name="Location" exists-action="override">
+                                <value>@($"{{{{OAuthBaseUrl}}}}/authorize?client_id={context.Variables.GetValueOrDefault<string>("client_id")}&redirect_uri={System.Net.WebUtility.UrlEncode(context.Variables.GetValueOrDefault<string>("redirect_uri"))}&state={context.Variables.GetValueOrDefault<string>("state")}&consent=granted")</value>
+                            </set-header>
+                        </return-response>
+                    </when>
+                    <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "deny")">
+                        <!-- Store consent denial in cache -->
+                        <cache-store-value key="@($"ClientConsent-{context.Variables.GetValueOrDefault<string>("client_id")}")" 
+                                        value="denied" duration="31536000" />
+                        
+                        <!-- Return error response to client -->
+                        <return-response>
+                            <set-status code="403" reason="Forbidden" />
+                            <set-header name="Content-Type" exists-action="override">
+                                <value>application/json</value>
+                            </set-header>
+                            <set-body>@{
+                                var errorResponse = new JObject();
+                                errorResponse["error"] = "access_denied";
+                                errorResponse["error_description"] = "User denied access to the application.";
+                                return errorResponse.ToString();
+                            }</set-body>
+                        </return-response>
+                    </when>
+                </choose>
+            </when>
+            <!-- For GET requests, display consent page -->
+            <otherwise>
+                <!-- Retrieve client information from cache -->
+                <cache-lookup-value key="@($"ClientInfo-{context.Variables.GetValueOrDefault<string>("client_id")}")" variable-name="clientInfoJson" />
+                
+                <choose>
+                    <when condition="@(!string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("clientInfoJson")))">
+                        <set-variable name="clientInfo" value="@(JObject.Parse(context.Variables.GetValueOrDefault<string>("clientInfoJson")))" />
+                        <set-variable name="client_name" value="@(((JObject)context.Variables.GetValueOrDefault<JObject>("clientInfo"))["client_name"]?.ToString() ?? "Unknown Application")" />
+                        
+                        <!-- Read in the consent page template -->
+                        <set-variable name="consent_template" value="@{
+                            string basePath = context.Request.Url.GetComponents(System.UriComponents.Scheme | System.UriComponents.Host | System.UriComponents.Port, System.UriFormat.UriEscaped);
+                            string resourcePath = "consent-page.html";
+                            
+                            // In a real implementation, you would read the HTML template from a resource
+                            // For this example, we'll include the template directly
+                            
+                            // Read from a file that was uploaded as a resource
+                            // This is a simplified implementation - in real world scenarios, 
+                            // you'd use a more robust approach to retrieve the template
+                            
+                            // Simulating template retrieval - in a real implementation, this would read from a file
+                            var htmlContent = context.Resources.GetString("consent-page.html");
+                            return htmlContent ?? "<html><body><h1>Consent Required</h1><p>Error loading consent page template.</p></body></html>";
+                        }" />
+                        
+                        <!-- Replace placeholders in template -->
+                        <set-variable name="consent_page" value="@{
+                            string template = context.Variables.GetValueOrDefault<string>("consent_template");
+                            string basePath = context.Request.Url.GetComponents(System.UriComponents.Scheme | System.UriComponents.Host | System.UriComponents.Port, System.UriFormat.UriEscaped);
+                            
+                            template = template.Replace("{{client_name}}", context.Variables.GetValueOrDefault<string>("client_name"));
+                            template = template.Replace("{{client_id}}", context.Variables.GetValueOrDefault<string>("client_id"));
+                            template = template.Replace("{{redirect_uri}}", context.Variables.GetValueOrDefault<string>("redirect_uri"));
+                            template = template.Replace("{{state}}", context.Variables.GetValueOrDefault<string>("state"));
+                            template = template.Replace("{{consent_action_url}}", basePath + "/consent");
+                            
+                            return template;
+                        }" />
+                        
+                        <!-- Return the consent page -->
+                        <return-response>
+                            <set-status code="200" reason="OK" />
+                            <set-header name="Content-Type" exists-action="override">
+                                <value>text/html</value>
+                            </set-header>
+                            <set-body>@(context.Variables.GetValueOrDefault<string>("consent_page"))</set-body>
+                        </return-response>
+                    </when>
+                    <otherwise>
+                        <!-- Client information not found -->
+                        <return-response>
+                            <set-status code="400" reason="Bad Request" />
+                            <set-header name="Content-Type" exists-action="override">
+                                <value>application/json</value>
+                            </set-header>
+                            <set-body>@{
+                                var errorResponse = new JObject();
+                                errorResponse["error"] = "invalid_client";
+                                errorResponse["error_description"] = "Client not found or not properly registered.";
+                                return errorResponse.ToString();
+                            }</set-body>
+                        </return-response>
+                    </otherwise>
+                </choose>
+            </otherwise>
+        </choose>
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>
