@@ -10,120 +10,386 @@
 -->
 <policies>
     <inbound>
-        <base />
-        <!-- Extract parameters from request -->
+        <base />        <!-- Extract parameters from request -->
         <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
         <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />
         <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
-        <set-variable name="consent_action" value="@((string)context.Request.Body.As<JObject>(preserveContent: true)["consent_action"]?.ToString() ?? "")" />
+          <!-- Check for existing denial cookie for this client_id and redirect_uri combination -->
+        <set-variable name="has_denial_cookie" value="@{
+            if (string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("client_id", "")) || 
+                string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("redirect_uri", ""))) {
+                return false;
+            }
+            
+            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+            string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+            string cookieName = $"MCP_DENIAL_{clientId}_{System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(redirectUri))}";
+            
+            // Check for cookie in request
+            var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
+            if (string.IsNullOrEmpty(cookieHeader)) {
+                return false;
+            }
+            
+            // Parse cookies
+            string[] cookies = cookieHeader.Split(';');
+            foreach (string cookie in cookies) {
+                string trimmedCookie = cookie.Trim();
+                if (trimmedCookie.StartsWith(cookieName + "=")) {
+                    return true;
+                }
+            }
+            
+            return false;
+        }" />
+        
+        <set-variable name="consent_action" value="@{
+            // For POST requests, try to extract from form data
+            if (context.Request.Method == "POST")
+            {
+                // Check for content type
+                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
+                // Handle form-data submissions
+                if (contentType.Contains("application/x-www-form-urlencoded"))
+                {
+                    // Parse form data
+                    string body = context.Request.Body.As<string>(preserveContent: true);
+                    string[] pairs = body.Split('&');
+                    foreach (string pair in pairs)
+                    {
+                        string[] keyValue = pair.Split('=');
+                        if (keyValue.Length == 2 && keyValue[0] == "consent_action")
+                        {
+                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
+                        }
+                    }
+                }
+                // Still try to extract from JSON if form parsing didn't work
+                return context.Request.Body.As<JObject>(preserveContent: true)["consent_action"]?.ToString() ?? "";
+            }
+            return "";
+        }" />
         
         <!-- If this is a form submission, process the consent choice -->
         <choose>
             <when condition="@(context.Request.Method == "POST")">
-                <choose>
+                <choose>                    
                     <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
-                        <!-- Store consent status in cache -->
-                        <cache-store-value key="@($"ClientConsent-{context.Variables.GetValueOrDefault<string>("client_id")}")" 
-                                        value="granted" duration="31536000" />
-                        
                         <!-- Set consent cookie -->
                         <set-header name="Set-Cookie" exists-action="append">
                             <value>@($"MCP_CLIENT_CONSENT_{context.Variables.GetValueOrDefault<string>("client_id")}=granted; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax")</value>
-                        </set-header>
-                        
-                        <!-- Redirect back to authorization flow -->
+                        </set-header>                        <!-- Redirect back to authorization flow -->
                         <return-response>
                             <set-status code="302" reason="Found" />
                             <set-header name="Location" exists-action="override">
-                                <value>@($"{{{{OAuthBaseUrl}}}}/authorize?client_id={context.Variables.GetValueOrDefault<string>("client_id")}&redirect_uri={System.Net.WebUtility.UrlEncode(context.Variables.GetValueOrDefault<string>("redirect_uri"))}&state={context.Variables.GetValueOrDefault<string>("state")}&consent=granted")</value>
+                                <value>@{
+                                    string baseUrl = "{{APIMGatewayURL}}";
+                                    string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                                    string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                                    string state = context.Variables.GetValueOrDefault<string>("state", "");
+                                    
+                                    return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={System.Net.WebUtility.UrlEncode(redirectUri)}&state={state}&consent=granted";
+                                }</value>
                             </set-header>
                         </return-response>
-                    </when>
+                    </when>                    
                     <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "deny")">
-                        <!-- Store consent denial in cache -->
-                        <cache-store-value key="@($"ClientConsent-{context.Variables.GetValueOrDefault<string>("client_id")}")" 
-                                        value="denied" duration="31536000" />
+                        <!-- Set a more specific consent denial cookie that includes both client ID and redirect URI -->
+                        <set-header name="Set-Cookie" exists-action="append">
+                            <value>@{
+                                string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                                string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                                
+                                // Create a cookie name unique to this client ID and redirect URI combination
+                                // Base64 encode the redirect URI to make it safe for a cookie name
+                                string cookieName = $"MCP_DENIAL_{clientId}_{System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(redirectUri))}";
+                                
+                                return $"{cookieName}=true; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax";
+                            }</value>
+                        </set-header>
                         
-                        <!-- Return error response to client -->
+                        <!-- Keep the general denial cookie for backward compatibility -->
+                        <set-header name="Set-Cookie" exists-action="append">
+                            <value>@($"MCP_CLIENT_CONSENT_{context.Variables.GetValueOrDefault<string>("client_id")}=denied; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax")</value>
+                        </set-header>
+                        
+                        <!-- Return a proper access denied page -->
                         <return-response>
                             <set-status code="403" reason="Forbidden" />
                             <set-header name="Content-Type" exists-action="override">
-                                <value>application/json</value>
+                                <value>text/html</value>
+                            </set-header>
+                            <!-- Explicitly disable any redirects -->
+                            <set-header name="Cache-Control" exists-action="override">
+                                <value>no-store, no-cache</value>
+                            </set-header>
+                            <set-header name="Pragma" exists-action="override">
+                                <value>no-cache</value>
                             </set-header>
                             <set-body>@{
-                                var errorResponse = new JObject();
-                                errorResponse["error"] = "access_denied";
-                                errorResponse["error_description"] = "User denied access to the application.";
-                                return errorResponse.ToString();
+                                return @"<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Access Denied</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            text-align: center;
+        }
+        .container {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 30px;
+            margin-top: 50px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #d83b01;
+            margin-bottom: 20px;
+        }
+        .message {
+            margin: 20px 0;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+            background-color: #0078d4;
+            color: white;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <h1>Access Denied</h1>
+        <div class='message'>
+            <p>You have denied access to the application.</p>
+            <p>The application will not be able to access your account or data.</p>
+        </div>
+        <p>You can close this window safely.</p>
+    </div>
+</body>
+</html>";
                             }</set-body>
                         </return-response>
-                    </when>
-                </choose>
-            </when>
-            <!-- For GET requests, display consent page -->
+                    </when>                </choose>            </when>
+            <!-- For GET requests, check for denial cookie first, then display consent page if no cookie found -->
             <otherwise>
-                <!-- Retrieve client information from cache -->
-                <cache-lookup-value key="@($"ClientInfo-{context.Variables.GetValueOrDefault<string>("client_id")}")" variable-name="clientInfoJson" />
-                
+                <!-- If there's a denial cookie, return access denied page immediately -->
                 <choose>
-                    <when condition="@(!string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("clientInfoJson")))">
-                        <set-variable name="clientInfo" value="@(JObject.Parse(context.Variables.GetValueOrDefault<string>("clientInfoJson")))" />
-                        <set-variable name="client_name" value="@(((JObject)context.Variables.GetValueOrDefault<JObject>("clientInfo"))["client_name"]?.ToString() ?? "Unknown Application")" />
-                        
-                        <!-- Read in the consent page template -->
-                        <set-variable name="consent_template" value="@{
-                            string basePath = context.Request.Url.GetComponents(System.UriComponents.Scheme | System.UriComponents.Host | System.UriComponents.Port, System.UriFormat.UriEscaped);
-                            string resourcePath = "consent-page.html";
-                            
-                            // In a real implementation, you would read the HTML template from a resource
-                            // For this example, we'll include the template directly
-                            
-                            // Read from a file that was uploaded as a resource
-                            // This is a simplified implementation - in real world scenarios, 
-                            // you'd use a more robust approach to retrieve the template
-                            
-                            // Simulating template retrieval - in a real implementation, this would read from a file
-                            var htmlContent = context.Resources.GetString("consent-page.html");
-                            return htmlContent ?? "<html><body><h1>Consent Required</h1><p>Error loading consent page template.</p></body></html>";
-                        }" />
-                        
-                        <!-- Replace placeholders in template -->
-                        <set-variable name="consent_page" value="@{
-                            string template = context.Variables.GetValueOrDefault<string>("consent_template");
-                            string basePath = context.Request.Url.GetComponents(System.UriComponents.Scheme | System.UriComponents.Host | System.UriComponents.Port, System.UriFormat.UriEscaped);
-                            
-                            template = template.Replace("{{client_name}}", context.Variables.GetValueOrDefault<string>("client_name"));
-                            template = template.Replace("{{client_id}}", context.Variables.GetValueOrDefault<string>("client_id"));
-                            template = template.Replace("{{redirect_uri}}", context.Variables.GetValueOrDefault<string>("redirect_uri"));
-                            template = template.Replace("{{state}}", context.Variables.GetValueOrDefault<string>("state"));
-                            template = template.Replace("{{consent_action_url}}", basePath + "/consent");
-                            
-                            return template;
-                        }" />
-                        
-                        <!-- Return the consent page -->
+                    <when condition="@(context.Variables.GetValueOrDefault<bool>("has_denial_cookie"))">
                         <return-response>
-                            <set-status code="200" reason="OK" />
+                            <set-status code="403" reason="Forbidden" />
                             <set-header name="Content-Type" exists-action="override">
                                 <value>text/html</value>
                             </set-header>
-                            <set-body>@(context.Variables.GetValueOrDefault<string>("consent_page"))</set-body>
+                            <!-- Explicitly disable any redirects -->
+                            <set-header name="Cache-Control" exists-action="override">
+                                <value>no-store, no-cache</value>
+                            </set-header>
+                            <set-header name="Pragma" exists-action="override">
+                                <value>no-cache</value>
+                            </set-header>
+                            <set-body>@{
+                                return @"<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Access Denied</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            text-align: center;
+        }
+        .container {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 30px;
+            margin-top: 50px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #d83b01;
+            margin-bottom: 20px;
+        }
+        .message {
+            margin: 20px 0;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+            background-color: #0078d4;
+            color: white;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <h1>Access Denied</h1>
+        <div class='message'>
+            <p>You have previously denied access to this application.</p>
+            <p>The application will not be able to access your account or data.</p>
+        </div>
+        <p>You can close this window safely.</p>
+    </div>
+</body>
+</html>";
+                            }</set-body>
                         </return-response>
                     </when>
                     <otherwise>
-                        <!-- Client information not found -->
-                        <return-response>
-                            <set-status code="400" reason="Bad Request" />
-                            <set-header name="Content-Type" exists-action="override">
-                                <value>application/json</value>
-                            </set-header>
-                            <set-body>@{
-                                var errorResponse = new JObject();
-                                errorResponse["error"] = "invalid_client";
-                                errorResponse["error_description"] = "Client not found or not properly registered.";
-                                return errorResponse.ToString();
-                            }</set-body>
-                        </return-response>
+                        <!-- Set client name to the client ID since we're not storing client info in cache anymore -->
+                        <set-variable name="client_name" value="@(context.Variables.GetValueOrDefault<string>("client_id") ?? "Unknown Application")" />
+                
+                <!-- Read in the consent page template -->
+               
+                <set-variable name="consent_template_head" value="@{
+    return @"<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Application Consent</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .consent-container {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #0078d4;
+            margin-bottom: 20px;
+        }
+        .client-info {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 10px 0;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-primary {
+            background-color: #0078d4;
+            color: white;
+            border: none;
+        }
+        .btn-secondary {
+            background-color: #e0e0e0;
+            color: #333;
+            border: none;
+            margin-left: 10px;
+        }
+        .buttons {
+            margin-top: 20px;
+        }
+    </style>
+</head>";
+}" />
+
+<set-variable name="consent_template_body" value="@{
+    return @"<body>
+    <div class='consent-container'>
+        <h1>Application Access Request</h1>
+        <p>The following application is requesting access to your account:</p>
+        
+        <div class='client-info'>
+            <p><strong>Application ID:</strong> __CLIENT_ID__</p>
+            <p><strong>Redirect URI:</strong> __REDIRECT_URI__</p>
+        </div>
+        
+        <p>By allowing access, you are permitting this application to act on your behalf.</p>
+          <div class='buttons'>
+            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block; margin-right: 10px;'>
+                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
+                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
+                <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='consent_action' value='allow'>
+                <button type='submit' class='btn btn-primary'>Allow</button>
+            </form>
+            
+            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
+                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
+                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
+                <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='consent_action' value='deny'>
+                <button type='submit' class='btn btn-secondary'>Deny</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>";
+}" />
+
+<!-- Then combine them when creating the consent page -->
+<set-variable name="consent_page" value="@{
+    string templateHead = context.Variables.GetValueOrDefault<string>("consent_template_head");
+    string templateBody = context.Variables.GetValueOrDefault<string>("consent_template_body");
+    string template = templateHead + templateBody;
+      // Use the service URL from APIM configuration instead of deriving from the request
+    // This ensures the form always posts back to this APIM instance
+    string basePath = "{{APIMGatewayURL}}";
+    
+    string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+    string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+    string decodedRedirectUri = System.Net.WebUtility.UrlDecode(redirectUri);
+    string state = context.Variables.GetValueOrDefault<string>("state", "");
+      template = template.Replace("__CLIENT_ID__", clientId);
+    template = template.Replace("__REDIRECT_URI__", decodedRedirectUri);
+    template = template.Replace("__STATE__", state);
+    template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");
+    
+    // Make sure the form hidden input still uses the encoded redirect URI for proper submission
+    template = template.Replace("value='__REDIRECT_URI__'", "value='" + redirectUri + "'");
+    
+    return template;
+}" />
+                
+                <!-- Return the consent page -->                <return-response>
+                    <set-status code="200" reason="OK" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>text/html</value>
+                    </set-header>
+                    <set-body>@{
+                        return context.Variables.GetValueOrDefault<string>("consent_page", "");
+                    }</set-body>                </return-response>
                     </otherwise>
                 </choose>
             </otherwise>
