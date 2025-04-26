@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
     CONSENT POLICY
     This policy handles the user consent process for dynamically registered clients.
@@ -10,11 +11,21 @@
 -->
 <policies>
     <inbound>
-        <base />        <!-- Extract parameters from request -->
+        <base />
+        <!-- Extract parameters from request -->
         <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
-        <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />
+        <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />       
         <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
-          <!-- Check for existing denial cookie for this client_id and redirect_uri combination -->        <set-variable name="has_denial_cookie" value="@{
+        
+        <!-- Explicitly normalize the redirect_uri by decoding it once -->
+        <set-variable name="normalized_redirect_uri" value="@{
+            string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+            // Single decode is enough - we want to work with the normal decoded version everywhere
+            return System.Net.WebUtility.UrlDecode(redirectUri);
+        }" />
+        
+        <!-- Check for existing denial cookie for this client_id and redirect_uri combination -->
+        <set-variable name="has_denial_cookie" value="@{
             try {
                 if (string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("client_id", "")) || 
                     string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("redirect_uri", ""))) {
@@ -22,10 +33,13 @@
                 }
                   
                 string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                // Always use the normalized (decoded) redirect URI for consistency
+                string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                 
                 // Define a consistent cookie name for denials
                 string DENIAL_COOKIE_NAME = "MCP_DENIED_CLIENTS";
+                
+                context.Trace($"DEBUG: Starting denial cookie check for clientId: {clientId}, redirectUri: {redirectUri}");
                 
                 // Check for cookie in request
                 var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
@@ -41,18 +55,51 @@
                         // Extract the cookie value
                         string cookieValue = trimmedCookie.Substring(DENIAL_COOKIE_NAME.Length + 1);
                         try {
-                            // Parse the base64-encoded JSON array of denied clients
+                            // Parse the base64-encoded JSON array of denied clients                            
                             string decodedValue = System.Text.Encoding.UTF8.GetString(
                                 System.Convert.FromBase64String(cookieValue.Split('.')[0]));
-                            JArray deniedClients = JArray.Parse(decodedValue);
+                            JArray deniedClients = JArray.Parse(decodedValue);                            
                             
                             // Create a unique identifier for this client/redirect combination
+                            // Use the normalized (decoded) redirect URI for consistency
                             string clientKey = $"{clientId}:{redirectUri}";
                             
                             // Check if this client/redirect is in the denied list
+                            context.Trace($"DEBUG: Checking cookie. Current clientKey: {clientKey}");
+                            context.Trace($"DEBUG: Decoded cookie content: {decodedValue}");
+                            
                             foreach (var item in deniedClients) {
-                                if (item.ToString() == clientKey) {
+                                string itemString = item.ToString();
+                                context.Trace($"DEBUG: Comparing against denied entry: {itemString}");
+                                
+                                // Direct comparison - no need for encoded version since we're using normalized URI
+                                if (itemString == clientKey) {
+                                    context.Trace($"DEBUG: Direct match found! Setting has_denial_cookie to true");
                                     return true;
+                                }
+                                
+                                // Handle URL-encoded redirectURI in cookie
+                                try {
+                                    string storedValue = itemString;
+                                    if (storedValue.Contains(':')) {
+                                        string[] parts = storedValue.Split(new char[] {':'}, 2);
+                                        if (parts.Length == 2) {
+                                            string storedClientId = parts[0];
+                                            // Always decode the stored redirect URI once for comparison
+                                            string storedRedirectUri = System.Net.WebUtility.UrlDecode(parts[1]);
+                                            
+                                            context.Trace($"DEBUG: Split values - storedClientId: {storedClientId}, decoded redirectUri: {storedRedirectUri}");
+                                            context.Trace($"DEBUG: Comparing against - clientId: {clientId}, normalized redirectUri: {redirectUri}");
+                                            
+                                            // Simple direct comparison since both are now in decoded form
+                                            if (storedClientId == clientId && storedRedirectUri == redirectUri) {
+                                                context.Trace($"DEBUG: Match found! Setting has_denial_cookie to true");
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                } catch (Exception ex) {
+                                    context.Trace($"Error comparing encoded values: {ex.Message}");
                                 }
                             }
                         } catch (Exception ex) {
@@ -78,7 +125,8 @@
                 }
                   
                 string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                // Always use the normalized (decoded) redirect URI for consistency
+                string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                 
                 // Define a consistent cookie name for approvals
                 string APPROVAL_COOKIE_NAME = "MCP_APPROVED_CLIENTS";
@@ -103,6 +151,7 @@
                             JArray approvedClients = JArray.Parse(decodedValue);
                             
                             // Create a unique identifier for this client/redirect combination
+                            // Always use the normalized redirect URI for consistency
                             string clientKey = $"{clientId}:{redirectUri}";
                             
                             // Check if this client/redirect is in the approved list
@@ -153,24 +202,28 @@
         }" />
         
         <!-- If this is a form submission, process the consent choice -->
-        <choose>            <when condition="@(context.Request.Method == "POST")">
-                <choose>                    <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
+        <choose>
+            <when condition="@(context.Request.Method == "POST")">
+                <choose>
+                    <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
                         <!-- Process consent approval: Calculate everything needed for response in inbound -->
                         <set-variable name="response_status_code" value="302" />
                         <set-variable name="response_redirect_location" value="@{
                             string baseUrl = "{{APIMGatewayURL}}";
                             string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                            // Use the original redirect URI as it's already encoded appropriately for a query parameter
                             string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
                             string state = context.Variables.GetValueOrDefault<string>("state", "");
                             
-                            return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={System.Net.WebUtility.UrlEncode(redirectUri)}&state={state}&consent=granted";
+                            return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={redirectUri}&state={state}&consent=granted";
                         }" />
                         
                         <!-- Calculate the cookie value right here in inbound before returning response -->
                         <set-variable name="approval_cookie" value="@{
                             string cookieName = "MCP_APPROVED_CLIENTS";
                             string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                            string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                            // Use the normalized redirect URI for cookies
+                            string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                             
                             // Create a unique identifier for this client/redirect combination
                             string clientKey = $"{clientId}:{redirectUri}";
@@ -239,14 +292,16 @@
                                 <value>@(context.Variables.GetValueOrDefault<string>("approval_cookie"))</value>
                             </set-header>
                         </return-response>
-                    </when>                    <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "deny")">
+                    </when>
+                    <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "deny")">
                         <!-- Process consent denial: Calculate everything needed for response in inbound -->
                         <set-variable name="response_status_code" value="403" />
                         <set-variable name="response_content_type" value="text/html" />
                         <set-variable name="response_cache_control" value="no-store, no-cache" />
                         <set-variable name="response_pragma" value="no-cache" />
                         
-                        <!-- Calculate the cookie value right here in inbound before returning response -->                        <set-variable name="denial_cookie" value="@{
+                        <!-- Calculate the cookie value right here in inbound before returning response -->
+                        <set-variable name="denial_cookie" value="@{
                             string cookieName = "MCP_DENIED_CLIENTS";
                             
                             // Extract client_id and redirect_uri directly from the POST form data
@@ -267,6 +322,7 @@
                                     }
                                     else if (keyValue[0] == "redirect_uri")
                                     {
+                                        // Important - decode the redirect_uri from form data
                                         redirectUri = System.Net.WebUtility.UrlDecode(keyValue[1]);
                                     }
                                 }
@@ -280,7 +336,8 @@
                             
                             if (string.IsNullOrEmpty(redirectUri))
                             {
-                                redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                                // Use the normalized version when falling back
+                                redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                             }
                             
                             // Log for diagnosis
@@ -417,7 +474,8 @@
                                 <value>@(context.Variables.GetValueOrDefault<string>("denial_cookie"))</value>
                             </set-header>
                             <set-body>@(context.Variables.GetValueOrDefault<string>("response_body", ""))</set-body>
-                        </return-response></when>
+                        </return-response>
+                    </when>
                     <otherwise>
                         <return-response>
                             <set-status code="403" reason="Forbidden" />
@@ -489,7 +547,9 @@
                             }</set-body>
                         </return-response>
                     </otherwise>
-                </choose></when>            <!-- For GET requests, check for cookies first, then display consent page if no cookie found -->
+                </choose>
+            </when>
+            <!-- For GET requests, check for cookies first, then display consent page if no cookie found -->
             <otherwise>
                 <choose>
                     <!-- If there's an approval cookie, skip consent and redirect to authorization endpoint -->
@@ -498,10 +558,11 @@
                         <set-variable name="response_redirect_location" value="@{
                             string baseUrl = "{{APIMGatewayURL}}";
                             string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                            // Use original redirect_uri as it's already properly encoded for URL
                             string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
                             string state = context.Variables.GetValueOrDefault<string>("state", "");
                             
-                            return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={System.Net.WebUtility.UrlEncode(redirectUri)}&state={state}&consent=granted";
+                            return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={redirectUri}&state={state}&consent=granted";
                         }" />
                         
                         <!-- Redirect to authorization endpoint -->
@@ -591,10 +652,9 @@
                         <!-- Set client name to the client ID since we're not storing client info in cache anymore -->
                         <set-variable name="client_name" value="@(context.Variables.GetValueOrDefault<string>("client_id") ?? "Unknown Application")" />
                 
-                <!-- Read in the consent page template -->
-               
-                <set-variable name="consent_template_head" value="@{
-    return @"<!DOCTYPE html>
+                        <!-- Read in the consent page template -->
+                        <set-variable name="consent_template_head" value="@{
+                            return @"<!DOCTYPE html>
 <html lang='en'>
 <head>
     <meta charset='UTF-8'>
@@ -650,10 +710,10 @@
         }
     </style>
 </head>";
-}" />
+                        }" />
 
-<set-variable name="consent_template_body" value="@{
-    return @"<body>
+                        <set-variable name="consent_template_body" value="@{
+                            return @"<body>
     <div class='consent-container'>
         <h1>Application Access Request</h1>
         <p>The following application is requesting access to your account:</p>
@@ -664,7 +724,7 @@
         </div>
         
         <p>By allowing access, you are permitting this application to act on your behalf.</p>
-          <div class='buttons'>
+        <div class='buttons'>
             <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block; margin-right: 10px;'>
                 <input type='hidden' name='client_id' value='__CLIENT_ID__'>
                 <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
@@ -684,40 +744,47 @@
     </div>
 </body>
 </html>";
-}" />
+                        }" />
 
-<!-- Then combine them when creating the consent page -->
-<set-variable name="consent_page" value="@{
-    string templateHead = context.Variables.GetValueOrDefault<string>("consent_template_head");
-    string templateBody = context.Variables.GetValueOrDefault<string>("consent_template_body");
-    string template = templateHead + templateBody;
-      // Use the service URL from APIM configuration instead of deriving from the request
-    // This ensures the form always posts back to this APIM instance
-    string basePath = "{{APIMGatewayURL}}";
-    
-    string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-    string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
-    string decodedRedirectUri = System.Net.WebUtility.UrlDecode(redirectUri);
-    string state = context.Variables.GetValueOrDefault<string>("state", "");
-      template = template.Replace("__CLIENT_ID__", clientId);
-    template = template.Replace("__REDIRECT_URI__", decodedRedirectUri);
-    template = template.Replace("__STATE__", state);
-    template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");
-    
-    // Make sure the form hidden input still uses the encoded redirect URI for proper submission
-    template = template.Replace("value='__REDIRECT_URI__'", "value='" + redirectUri + "'");
-    
-    return template;
-}" />
-                
-                <!-- Return the consent page -->                <return-response>
-                    <set-status code="200" reason="OK" />
-                    <set-header name="Content-Type" exists-action="override">
-                        <value>text/html</value>
-                    </set-header>
-                    <set-body>@{
-                        return context.Variables.GetValueOrDefault<string>("consent_page", "");
-                    }</set-body>                </return-response>
+                        <!-- Then combine them when creating the consent page -->
+                        <set-variable name="consent_page" value="@{
+                            string templateHead = context.Variables.GetValueOrDefault<string>("consent_template_head");
+                            string templateBody = context.Variables.GetValueOrDefault<string>("consent_template_body");
+                            string template = templateHead + templateBody;
+                            
+                            // Use the service URL from APIM configuration instead of deriving from the request
+                            // This ensures the form always posts back to this APIM instance
+                            string basePath = "{{APIMGatewayURL}}";
+                            
+                            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                            // Use the decoded version for display in the form
+                            string normalizedRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                            // Use the original encoded version for form submission
+                            string originalRedirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                            string state = context.Variables.GetValueOrDefault<string>("state", "");
+                            
+                            template = template.Replace("__CLIENT_ID__", clientId);
+                            // Use decoded URI for display
+                            template = template.Replace("__REDIRECT_URI__", normalizedRedirectUri);
+                            template = template.Replace("__STATE__", state);
+                            template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");
+                            
+                            // BUT use the original encoded URI for form hidden field to maintain encoding consistency
+                            template = template.Replace("value='" + normalizedRedirectUri + "'", "value='" + originalRedirectUri + "'");
+                            
+                            return template;
+                        }" />
+                        
+                        <!-- Return the consent page -->
+                        <return-response>
+                            <set-status code="200" reason="OK" />
+                            <set-header name="Content-Type" exists-action="override">
+                                <value>text/html</value>
+                            </set-header>
+                            <set-body>@{
+                                return context.Variables.GetValueOrDefault<string>("consent_page", "");
+                            }</set-body>
+                        </return-response>
                     </otherwise>
                 </choose>
             </otherwise>
@@ -725,7 +792,8 @@
     </inbound>
     <backend>
         <base />
-    </backend>    <outbound>
+    </backend>
+    <outbound>
         <base />
         <!-- Debug trace to verify variables are preserved -->
         <trace source="outbound-debug" severity="information">
@@ -742,7 +810,8 @@
                     <value>@{
                         string cookieName = context.Variables.GetValueOrDefault<string>("cookie_name", "MCP_APPROVED_CLIENTS");
                         string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                        string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                        // Use the normalized redirect URI for cookies
+                        string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                         
                         // Create a unique identifier for this client/redirect combination
                         string clientKey = $"{clientId}:{redirectUri}";
@@ -811,7 +880,8 @@
                     <value>@{
                         string cookieName = context.Variables.GetValueOrDefault<string>("cookie_name", "MCP_DENIED_CLIENTS");
                         string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                        string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                        // Use the normalized redirect URI for cookies
+                        string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                         
                         // Create a unique identifier for this client/redirect combination
                         string clientKey = $"{clientId}:{redirectUri}";
