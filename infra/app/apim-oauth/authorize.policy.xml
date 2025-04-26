@@ -47,7 +47,7 @@
                     <set-header name="Location" exists-action="override">
                         <value>@{
                             string basePath = context.Request.OriginalUrl.Scheme + "://" + context.Request.OriginalUrl.Host + (context.Request.OriginalUrl.Port == 80 || context.Request.OriginalUrl.Port == 443 ? "" : ":" + context.Request.OriginalUrl.Port);
-                            return $"{basePath}/consent?client_id={context.Variables.GetValueOrDefault<string>("clientId")}&redirect_uri={System.Net.WebUtility.UrlEncode(context.Variables.GetValueOrDefault<string>("redirect_uri"))}&state={context.Variables.GetValueOrDefault<string>("state")}";
+                            return $"{basePath}/consent?client_id={context.Variables.GetValueOrDefault<string>("clientId")}&redirect_uri={context.Variables.GetValueOrDefault<string>("redirect_uri")}&state={context.Variables.GetValueOrDefault<string>("state")}";
                         }</value>
                     </set-header>
                 </return-response>
