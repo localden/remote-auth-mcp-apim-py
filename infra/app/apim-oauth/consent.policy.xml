@@ -10,20 +10,322 @@
     4. Store consent status and redirect to original flow
 -->
 <policies>
-    <inbound>
-        <base />
+    <inbound>        <base />
         <!-- Extract parameters from request -->
         <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
         <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />       
         <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
         
-        <!-- Explicitly normalize the redirect_uri by decoding it once -->
+        <!-- Define common CSS and HTML templates for reuse -->
+        <set-variable name="common_css" value="@{
+            return @"
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            color: #e4e4e4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container, .consent-container {
+            background-color: rgba(30, 30, 50, 0.8);
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(100, 100, 180, 0.2);
+        }
+        .container {
+            text-align: center;
+        }
+        h1 {
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(100, 100, 180, 0.3);
+            padding-bottom: 10px;
+        }
+        .consent-heading {
+            color: #8e9aff;
+        }
+        .denial-heading {
+            color: #ff7878;
+        }
+        p {
+            margin: 15px 0;
+            line-height: 1.7;
+        }
+        .client-info {
+            background-color: rgba(40, 40, 70, 0.5);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 3px solid #8e9aff;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 10px 0;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn-primary {
+            background-color: #4b6cb7;
+            color: white;
+            border: none;
+        }
+        .btn-primary:hover {
+            background-color: #5a7bd0;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        .btn-secondary {
+            background-color: rgba(180, 60, 60, 0.8);
+            color: #e4e4e4;
+            border: 1px solid rgba(220, 100, 100, 0.3);
+        }
+        .btn-secondary:hover {
+            background-color: rgba(200, 70, 70, 0.9);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        .buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-start;
+        }
+        a {
+            color: #8e9aff;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        strong {
+            color: #a0b0ff;
+        }";
+        }" />        <!-- HTML template for access denied page -->
+        <set-variable name="access_denied_template" value="@{
+            return @"<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Access Denied</title>
+    <style>
+__COMMON_STYLES__
+    </style>
+</head>
+<body>
+    <div class='consent-container'>
+        <h1 class='denial-heading'>Access Denied</h1>
+        <p>__DENIAL_MESSAGE__</p>
+        <p>The application will not be able to access your data.</p>
+        <p>You can close this window safely.</p>
+    </div>
+</body>
+</html>";
+        }" />
+        
+        <!-- HTML template for consent page -->
+        <set-variable name="consent_page_template" value="@{
+            return @"<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Application Consent</title>
+    <style>
+__COMMON_CSS__
+    </style>
+</head>
+<body>
+    <div class='consent-container'>
+        <h1 class='consent-heading'>Application Access Request</h1>
+        <p>The following application is requesting authorization against the MCP server:</p>
+        
+        <div class='client-info'>
+            <p><strong>Application ID:</strong> __CLIENT_ID__</p>
+            <p><strong>Redirect URI:</strong> __REDIRECT_URI__</p>
+        </div>
+        
+        <p>By allowing access, you are permitting this application to be authorized against the MCP server and have access to your user data.</p>
+        <div class='buttons'>
+            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
+                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
+                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
+                <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='consent_action' value='allow'>
+                <button type='submit' class='btn btn-primary'>Allow</button>
+            </form>
+            
+            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
+                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
+                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
+                <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='consent_action' value='deny'>
+                <button type='submit' class='btn btn-secondary'>Deny</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>";
+        }" />
+          <!-- Explicitly normalize the redirect_uri by decoding it once -->
         <set-variable name="normalized_redirect_uri" value="@{
             string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
             // Single decode is enough - we want to work with the normal decoded version everywhere
             return System.Net.WebUtility.UrlDecode(redirectUri);
         }" />
         
+        <!-- Define common CSS for reuse in both consent and access denied pages -->
+        <set-variable name="common_styles" value="@{
+            return @"
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            color: #e4e4e4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container, .consent-container {
+            background-color: rgba(30, 30, 50, 0.8);
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(100, 100, 180, 0.2);
+        }
+        .container {
+            text-align: center;
+        }
+        h1 {
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(100, 100, 180, 0.3);
+            padding-bottom: 10px;
+        }
+        .consent-heading {
+            color: #8e9aff;
+        }
+        .denial-heading {
+            color: #ff7878;
+        }
+        p {
+            margin: 15px 0;
+            line-height: 1.7;
+        }
+        .client-info {
+            background-color: rgba(40, 40, 70, 0.5);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 3px solid #8e9aff;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 10px 0;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn-primary {
+            background-color: #4b6cb7;
+            color: white;
+            border: none;
+        }
+        .btn-primary:hover {
+            background-color: #5a7bd0;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        .btn-secondary {
+            background-color: rgba(180, 60, 60, 0.8);
+            color: #e4e4e4;
+            border: 1px solid rgba(220, 100, 100, 0.3);
+        }
+        .btn-secondary:hover {
+            background-color: rgba(200, 70, 70, 0.9);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        .buttons {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-start;
+        }
+        a {
+            color: #8e9aff;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        strong {
+            color: #a0b0ff;
+        }";
+        }" />
+          <!-- Template for consent page -->
+        <set-variable name="consent_page_template" value="@{
+            return @"<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Application Consent</title>
+    <style>
+__COMMON_STYLES__
+    </style>
+</head>
+<body>
+    <div class='consent-container'>
+        <h1 class='consent-heading'>Application Access Request</h1>
+        <p>The following application is requesting authorization against the MCP server:</p>
+        
+        <div class='client-info'>
+            <p><strong>Application ID:</strong> __CLIENT_ID__</p>
+            <p><strong>Redirect URI:</strong> __REDIRECT_URI__</p>
+        </div>
+        
+        <p>By allowing access, you are permitting this application to be authorized against the MCP server and have access to your user data.</p>
+        <div class='buttons'>
+            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
+                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
+                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
+                <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='consent_action' value='allow'>
+                <button type='submit' class='btn btn-primary'>Allow</button>
+            </form>
+            
+            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
+                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
+                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
+                <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='consent_action' value='deny'>
+                <button type='submit' class='btn btn-secondary'>Deny</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>";
+        }" />
+
         <!-- Check for existing denial cookie for this client_id and redirect_uri combination -->
         <set-variable name="has_denial_cookie" value="@{
             try {
@@ -144,13 +446,13 @@
                     if (trimmedCookie.StartsWith(APPROVAL_COOKIE_NAME + "=")) {
                         // Extract the cookie value
                         string cookieValue = trimmedCookie.Substring(APPROVAL_COOKIE_NAME.Length + 1);
-                        try {
+                        try {                            
                             // Parse the base64-encoded JSON array of approved clients
                             string decodedValue = System.Text.Encoding.UTF8.GetString(
                                 System.Convert.FromBase64String(cookieValue.Split('.')[0]));
                             JArray approvedClients = JArray.Parse(decodedValue);
                             
-                // Create a unique identifier for this client/redirect combination
+                            // Create a unique identifier for this client/redirect combination
                             // Always use the normalized redirect URI for consistency
                             string clientKey = $"{clientId}:{redirectUri}";
                             
@@ -463,75 +765,15 @@
                             return $"{cookieName}={encodedClients}; Max-Age=31536000; Path=/; Secure; HttpOnly; SameSite=Lax";
                         }" />                        <!-- Store the HTML content for the access denied page -->
                         <set-variable name="response_body" value="@{
-                            return @"<!DOCTYPE html>
-<html lang='en'>
-<head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>Access Denied</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 100%;
-            margin: 0;
-            padding: 0;
-            line-height: 1.6;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
-            color: #e4e4e4;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .container {
-            background-color: rgba(30, 30, 50, 0.8);
-            border-radius: 12px;
-            padding: 30px;
-            max-width: 600px;
-            width: 90%;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(5px);
-            border: 1px solid rgba(100, 100, 180, 0.2);
-            text-align: center;
-        }
-        h1 {
-            color: #ff7878;
-            margin-bottom: 20px;
-            border-bottom: 1px solid rgba(100, 100, 180, 0.3);
-            padding-bottom: 10px;
-        }
-        p {
-            margin: 15px 0;
-            line-height: 1.7;
-        }
-        .btn {
-            display: inline-block;
-            padding: 10px 20px;
-            margin: 20px 0;
-            border-radius: 6px;
-            text-decoration: none;
-            font-weight: 600;
-            cursor: pointer;
-            background-color: #4b6cb7;
-            color: white;
-            border: none;
-            transition: all 0.2s ease;
-        }
-        .btn:hover {
-            background-color: #5a7bd0;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-    </style>
-</head>
-<body>
-    <div class='container'>
-        <h1>Access Denied</h1>
-        <p>You have denied authorization for this application against the MCP server.</p>
-        <p>The application will not be able to access your data.</p>
-        <p>You can close this window safely.</p>
-    </div>
-</body>
-</html>";
+                            string denialTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
+                            string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+                            
+                            // Replace placeholders with actual content
+                            denialTemplate = denialTemplate.Replace("__COMMON_STYLES__", commonStyles);
+                            denialTemplate = denialTemplate.Replace("__DENIAL_MESSAGE__", 
+                                "You have denied authorization for this application against the MCP server.");
+                            
+                            return denialTemplate;
                         }" />
                         
                         <!-- Set variables for outbound policy awareness -->
@@ -569,75 +811,15 @@
                             <set-header name="Pragma" exists-action="override">
                                 <value>no-cache</value>
                             </set-header>                            <set-body>@{
-                                return @"<!DOCTYPE html>
-<html lang='en'>
-<head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>Access Denied</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 100%;
-            margin: 0;
-            padding: 0;
-            line-height: 1.6;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
-            color: #e4e4e4;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .container {
-            background-color: rgba(30, 30, 50, 0.8);
-            border-radius: 12px;
-            padding: 30px;
-            max-width: 600px;
-            width: 90%;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(5px);
-            border: 1px solid rgba(100, 100, 180, 0.2);
-            text-align: center;
-        }
-        h1 {
-            color: #ff7878;
-            margin-bottom: 20px;
-            border-bottom: 1px solid rgba(100, 100, 180, 0.3);
-            padding-bottom: 10px;
-        }
-        p {
-            margin: 15px 0;
-            line-height: 1.7;
-        }
-        .btn {
-            display: inline-block;
-            padding: 10px 20px;
-            margin: 20px 0;
-            border-radius: 6px;
-            text-decoration: none;
-            font-weight: 600;
-            cursor: pointer;
-            background-color: #4b6cb7;
-            color: white;
-            border: none;
-            transition: all 0.2s ease;
-        }
-        .btn:hover {
-            background-color: #5a7bd0;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-    </style>
-</head>
-<body>
-    <div class='container'>
-        <h1>Access Denied</h1>
-        <p>You have previously denied authorization for this application against the MCP server.</p>
-        <p>The application will not be able to access your data.</p>
-        <p>You can close this window safely.</p>
-    </div>
-</body>
-</html>";
+                                string denialTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
+                                string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+                                
+                                // Replace placeholders with actual content
+                                denialTemplate = denialTemplate.Replace("__COMMON_STYLES__", commonStyles);
+                                denialTemplate = denialTemplate.Replace("__DENIAL_MESSAGE__", 
+                                    "You have previously denied authorization for this application against the MCP server.");
+                                
+                                return denialTemplate;
                             }</set-body>
                         </return-response>
                     </otherwise>
@@ -681,62 +863,16 @@
                             </set-header>
                             <set-header name="Pragma" exists-action="override">
                                 <value>no-cache</value>
-                            </set-header>
-                            <set-body>@{
-                                return @"<!DOCTYPE html>
-<html lang='en'>
-<head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>Access Denied</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-            line-height: 1.6;
-            text-align: center;
-        }
-        .container {
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 30px;
-            margin-top: 50px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #d83b01;
-            margin-bottom: 20px;
-        }
-        .message {
-            margin: 20px 0;
-        }
-        .btn {
-            display: inline-block;
-            padding: 10px 20px;
-            margin: 20px 0;
-            border-radius: 4px;
-            text-decoration: none;
-            font-weight: 600;
-            cursor: pointer;
-            background-color: #0078d4;
-            color: white;
-            border: none;
-        }
-    </style>
-</head>
-<body>
-    <div class='container'>
-        <h1>Access Denied</h1>
-        <div class='message'>
-            <p>You have previously denied access to this application.</p>
-            <p>The application will not be able to access your account or data.</p>
-        </div>
-        <p>You can close this window safely.</p>
-    </div>
-</body>
-</html>";
+                            </set-header>                            <set-body>@{
+                                string denialTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
+                                string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+                                
+                                // Replace placeholders with actual content
+                                denialTemplate = denialTemplate.Replace("__COMMON_STYLES__", commonStyles);
+                                denialTemplate = denialTemplate.Replace("__DENIAL_MESSAGE__", 
+                                    "You have previously denied access to this application.");
+                                
+                                return denialTemplate;
                             }</set-body>
                         </return-response>
                     </when>
@@ -744,9 +880,8 @@
                     <!-- If no cookies found, show the consent screen -->
                     <otherwise>
                         <!-- Set client name to the client ID since we're not storing client info in cache anymore -->
-                        <set-variable name="client_name" value="@(context.Variables.GetValueOrDefault<string>("client_id") ?? "Unknown Application")" />
-                
-                        <!-- Read in the consent page template -->                        <set-variable name="consent_template_head" value="@{
+                        <set-variable name="client_name" value="@(context.Variables.GetValueOrDefault<string>("client_id") ?? "Unknown Application")" />                        <!-- Read in the consent page template -->
+                        <set-variable name="consent_template_head" value="@{
                             return @"<!DOCTYPE html>
 <html lang='en'>
 <head>
@@ -799,7 +934,8 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
-        }        .btn-primary {
+        }
+        .btn-primary {
             background-color: #4b6cb7;
             color: white;
             border: none;
