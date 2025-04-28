@@ -15,103 +15,8 @@
         <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
         <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />       
         <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
-        
-        <!-- Define common CSS and HTML templates for reuse -->
-        <set-variable name="common_css" value="@{
-            return @"
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 100%;
-            margin: 0;
-            padding: 0;
-            line-height: 1.6;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
-            color: #e4e4e4;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .container, .consent-container {
-            background-color: rgba(30, 30, 50, 0.8);
-            border-radius: 12px;
-            padding: 30px;
-            max-width: 600px;
-            width: 90%;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(5px);
-            border: 1px solid rgba(100, 100, 180, 0.2);
-        }
-        .container {
-            text-align: center;
-        }
-        h1 {
-            margin-bottom: 20px;
-            border-bottom: 1px solid rgba(100, 100, 180, 0.3);
-            padding-bottom: 10px;
-        }
-        .consent-heading {
-            color: #8e9aff;
-        }
-        .denial-heading {
-            color: #ff7878;
-        }
-        p {
-            margin: 15px 0;
-            line-height: 1.7;
-        }
-        .client-info {
-            background-color: rgba(40, 40, 70, 0.5);
-            padding: 15px;
-            border-radius: 8px;
-            margin: 15px 0;
-            border-left: 3px solid #8e9aff;
-        }
-        .btn {
-            display: inline-block;
-            padding: 10px 20px;
-            margin: 10px 0;
-            border-radius: 6px;
-            text-decoration: none;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        .btn-primary {
-            background-color: #4b6cb7;
-            color: white;
-            border: none;
-        }
-        .btn-primary:hover {
-            background-color: #5a7bd0;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-        .btn-secondary {
-            background-color: rgba(180, 60, 60, 0.8);
-            color: #e4e4e4;
-            border: 1px solid rgba(220, 100, 100, 0.3);
-        }
-        .btn-secondary:hover {
-            background-color: rgba(200, 70, 70, 0.9);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-        .buttons {
-            margin-top: 20px;
-            display: flex;
-            gap: 10px;
-            justify-content: flex-start;
-        }
-        a {
-            color: #8e9aff;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        strong {
-            color: #a0b0ff;
-        }";
-        }" />        <!-- HTML template for access denied page -->
+          <!-- Define common CSS placeholder for reference only - using common_styles below -->
+        <!-- The actual CSS definition is in common_styles below --><!-- HTML template for access denied page -->
         <set-variable name="access_denied_template" value="@{
             return @"<!DOCTYPE html>
 <html lang='en'>
@@ -133,51 +38,8 @@ __COMMON_STYLES__
 </body>
 </html>";
         }" />
-        
-        <!-- HTML template for consent page -->
-        <set-variable name="consent_page_template" value="@{
-            return @"<!DOCTYPE html>
-<html lang='en'>
-<head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>Application Consent</title>
-    <style>
-__COMMON_CSS__
-    </style>
-</head>
-<body>
-    <div class='consent-container'>
-        <h1 class='consent-heading'>Application Access Request</h1>
-        <p>The following application is requesting authorization against the MCP server:</p>
-        
-        <div class='client-info'>
-            <p><strong>Application ID:</strong> __CLIENT_ID__</p>
-            <p><strong>Redirect URI:</strong> __REDIRECT_URI__</p>
-        </div>
-        
-        <p>By allowing access, you are permitting this application to be authorized against the MCP server and have access to your user data.</p>
-        <div class='buttons'>
-            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
-                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
-                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
-                <input type='hidden' name='state' value='__STATE__'>
-                <input type='hidden' name='consent_action' value='allow'>
-                <button type='submit' class='btn btn-primary'>Allow</button>
-            </form>
-            
-            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
-                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
-                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
-                <input type='hidden' name='state' value='__STATE__'>
-                <input type='hidden' name='consent_action' value='deny'>
-                <button type='submit' class='btn btn-secondary'>Deny</button>
-            </form>
-        </div>
-    </div>
-</body>
-</html>";
-        }" />
+          <!-- Initial placeholder for consent page template - using the improved version below -->
+        <!-- The actual improved template is defined below -->
           <!-- Explicitly normalize the redirect_uri by decoding it once -->
         <set-variable name="normalized_redirect_uri" value="@{
             string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
@@ -280,8 +142,7 @@ __COMMON_CSS__
         strong {
             color: #a0b0ff;
         }";
-        }" />
-          <!-- Template for consent page -->
+        }" />          <!-- Consolidate CSS code blocks to reuse common_styles -->
         <set-variable name="consent_page_template" value="@{
             return @"<!DOCTYPE html>
 <html lang='en'>
@@ -291,6 +152,24 @@ __COMMON_CSS__
     <title>Application Consent</title>
     <style>
 __COMMON_STYLES__
+    /* Additional styles for field alignment */
+    .client-info p {
+        display: flex;
+        align-items: flex-start;
+        margin: 8px 0;
+    }
+    .client-info strong {
+        min-width: 130px;
+        flex-shrink: 0;
+    }
+    .client-info code {
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        background-color: rgba(30, 30, 50, 0.5);
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #a0e0ff;
+        word-break: break-all;
+    }
     </style>
 </head>
 <body>
@@ -299,8 +178,8 @@ __COMMON_STYLES__
         <p>The following application is requesting authorization against the MCP server:</p>
         
         <div class='client-info'>
-            <p><strong>Application ID:</strong> __CLIENT_ID__</p>
-            <p><strong>Redirect URI:</strong> __REDIRECT_URI__</p>
+            <p><strong>Application ID:</strong> <code>__CLIENT_ID__</code></p>
+            <p><strong>Redirect URI:</strong> <code>__REDIRECT_URI__</code></p>
         </div>
         
         <p>By allowing access, you are permitting this application to be authorized against the MCP server and have access to your user data.</p>
@@ -880,137 +759,12 @@ __COMMON_STYLES__
                     <!-- If no cookies found, show the consent screen -->
                     <otherwise>
                         <!-- Set client name to the client ID since we're not storing client info in cache anymore -->
-                        <set-variable name="client_name" value="@(context.Variables.GetValueOrDefault<string>("client_id") ?? "Unknown Application")" />                        <!-- Read in the consent page template -->
-                        <set-variable name="consent_template_head" value="@{
-                            return @"<!DOCTYPE html>
-<html lang='en'>
-<head>
-    <meta charset='UTF-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-    <title>Application Consent</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 100%;
-            margin: 0;
-            padding: 0;
-            line-height: 1.6;
-            min-height: 100vh;
-            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
-            color: #e4e4e4;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .consent-container {
-            background-color: rgba(30, 30, 50, 0.8);
-            border-radius: 12px;
-            padding: 30px;
-            max-width: 600px;
-            width: 90%;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(5px);
-            border: 1px solid rgba(100, 100, 180, 0.2);
-        }
-        h1 {
-            color: #8e9aff;
-            margin-bottom: 20px;
-            border-bottom: 1px solid rgba(100, 100, 180, 0.3);
-            padding-bottom: 10px;
-        }
-        .client-info {
-            background-color: rgba(40, 40, 70, 0.5);
-            padding: 15px;
-            border-radius: 8px;
-            margin: 15px 0;
-            border-left: 3px solid #8e9aff;
-        }
-        .btn {
-            display: inline-block;
-            padding: 10px 20px;
-            margin: 10px 0;
-            border-radius: 6px;
-            text-decoration: none;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        .btn-primary {
-            background-color: #4b6cb7;
-            color: white;
-            border: none;
-        }
-        .btn-primary:hover {
-            background-color: #5a7bd0;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-        .btn-secondary {
-            background-color: rgba(180, 60, 60, 0.8);
-            color: #e4e4e4;
-            border: 1px solid rgba(220, 100, 100, 0.3);
-        }
-        .btn-secondary:hover {
-            background-color: rgba(200, 70, 70, 0.9);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-        .buttons {
-            margin-top: 20px;
-            display: flex;
-            gap: 10px;
-            justify-content: flex-start;
-        }
-        a {
-            color: #8e9aff;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-        strong {
-            color: #a0b0ff;
-        }
-    </style>
-</head>";
-                        }" />                        <set-variable name="consent_template_body" value="@{
-                            return @"<body>
-    <div class='consent-container'>
-        <h1>Application Access Request</h1>
-        <p>The following application is requesting authorization against the MCP server:</p>
-        
-        <div class='client-info'>
-            <p><strong>Application ID:</strong> __CLIENT_ID__</p>
-            <p><strong>Redirect URI:</strong> __REDIRECT_URI__</p>
-        </div>
-        
-        <p>By allowing access, you are permitting this application to be authorized against the MCP server and have access to your user data.</p>
-        <div class='buttons'>
-            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
-                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
-                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
-                <input type='hidden' name='state' value='__STATE__'>
-                <input type='hidden' name='consent_action' value='allow'>
-                <button type='submit' class='btn btn-primary'>Allow</button>
-            </form>
-            
-            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
-                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
-                <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
-                <input type='hidden' name='state' value='__STATE__'>
-                <input type='hidden' name='consent_action' value='deny'>
-                <button type='submit' class='btn btn-secondary'>Deny</button>
-            </form>
-        </div>
-    </div>
-</body>
-</html>";
-                        }" /><!-- Then combine them when creating the consent page -->
+                        <set-variable name="client_name" value="@(context.Variables.GetValueOrDefault<string>("client_id") ?? "Unknown Application")" />                        <!-- Use the main consent template instead of separate head/body templates -->                        <!-- Using main consent template defined below -->                        <!-- Build consent page using the standardized template -->
                         <set-variable name="consent_page" value="@{
-                            string templateHead = context.Variables.GetValueOrDefault<string>("consent_template_head");
-                            string templateBody = context.Variables.GetValueOrDefault<string>("consent_template_body");
-                            string template = templateHead + templateBody;
+                            string template = context.Variables.GetValueOrDefault<string>("consent_page_template");
+                            string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
                             
-                            // Use the service URL from APIM configuration instead of deriving from the request
-                            // This ensures the form always posts back to this APIM instance
+                            // Use the service URL from APIM configuration
                             string basePath = "{{APIMGatewayURL}}";
                             
                             string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
@@ -1027,6 +781,9 @@ __COMMON_STYLES__
                             
                             // Create a temporary placeholder for the form fields
                             string FORM_FIELD_PLACEHOLDER = "___ENCODED_REDIRECT_URI___";
+                            
+                            // Replace the styles first
+                            template = template.Replace("__COMMON_STYLES__", commonStyles);
                             
                             // First, create a temporary placeholder for the form fields
                             template = template.Replace("value='__REDIRECT_URI__'", "value='" + FORM_FIELD_PLACEHOLDER + "'");
