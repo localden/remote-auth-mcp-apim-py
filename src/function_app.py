@@ -20,6 +20,7 @@ managed_identity = msal.UserAssignedManagedIdentity(client_id=application_uami)
 
 mi_auth_client = msal.ManagedIdentityClient(managed_identity, http_client=requests.Session())
 
+# Define the token function before using it
 def get_managed_identity_token(audience):
     token = mi_auth_client.acquire_token_for_client(resource=audience)
 
@@ -64,10 +65,12 @@ def get_jwks_key(token):
         if not issuer:
             return None, "JWT payload missing 'iss' (Issuer) claim"
         
+        # Check that the issuer exactly matches the expected format
         expected_issuer = f"https://sts.windows.net/{application_tenant}/"
         if issuer != expected_issuer:
             return None, f"JWT issuer '{issuer}' does not match expected issuer '{expected_issuer}'"
             
+        # Get the JWKS URI
         jwks_uri = f"https://login.microsoftonline.com/{application_tenant}/discovery/v2.0/keys"
         try:
             resp = requests.get(jwks_uri, timeout=10)
@@ -81,7 +84,8 @@ def get_jwks_key(token):
             return None, f"Network error fetching JWKS: {str(e)}"
         except json.JSONDecodeError as e:
             return None, f"Invalid JWKS response format: {str(e)}"
-
+        
+        # Find the signing key in the JWKS
         signing_key = None
         for key in jwks['keys']:
             if key.get('kid') == kid:
@@ -122,6 +126,7 @@ def validate_bearer_token(bearer_token, expected_audience):
         if not signing_key:
             return False, f"JWT key retrieval failed: {key_error}", None
         
+        # Validate the token with full verification
         try:
             decoded_token = jwt.decode(
                 bearer_token,
@@ -177,13 +182,13 @@ def get_graph_user_details(context) -> str:
     
     try:
         logging.info(f"Context type: {type(context).__name__}")
-
+        # Parse context to get the bearer token
         try:
             context_obj = json.loads(context)
-
+            # Navigate through nested structure to find bearerToken in arguments
             arguments = context_obj.get('arguments', {})
             bearer_token = None
-
+              # Log the arguments structure for debugging
             logging.info(f"Arguments structure: {json.dumps(arguments)[:500]}")
             
             if isinstance(arguments, dict):
@@ -194,10 +199,12 @@ def get_graph_user_details(context) -> str:
                 token_acquired = False
                 token_error = "No bearer token found in context arguments"
             else:
+                # Validate the JWT token using the dedicated function
                 expected_audience = f"api://{application_cid}"
                 is_valid, validation_error, decoded_token = validate_bearer_token(bearer_token, expected_audience)
                 
                 if is_valid:
+                    # Use On-Behalf-Of flow with the validated user's token
                     result = cca_auth_client.acquire_token_on_behalf_of(
                         user_assertion=bearer_token,
                         scopes=['https://graph.microsoft.com/.default']
@@ -213,12 +220,15 @@ def get_graph_user_details(context) -> str:
                     access_token = result["access_token"]
                     token_error = None
                     
+                    # Use the token to call Microsoft Graph API
                     try:
+                        # Create an authentication object for Microsoft Graph
                         headers = {
                             'Authorization': f'Bearer {access_token}',
                             'Content-Type': 'application/json'
                         }
-
+                        
+                        # Get the user profile information
                         graph_url = 'https://graph.microsoft.com/v1.0/me'
                         response = requests.get(graph_url, headers=headers)
                         
@@ -240,13 +250,17 @@ def get_graph_user_details(context) -> str:
             token_error = str(e)
             logging.error(f"Exception when acquiring token: {token_error}")
 
+        # Prepare the response
         try:
             response = {}
             
             if user_data:
+                # Return user data as the primary content
                 response = user_data
+                # Add status information
                 response['success'] = True
             else:
+                # If we failed to get user data, return error information
                 response['success'] = False
                 response['error'] = token_error or "Failed to retrieve user data"
             
@@ -265,3 +279,12 @@ def get_graph_user_details(context) -> str:
             "stack_trace": stack_trace,
             "raw_context": str(context)
         }, indent=2)
+
+def get_managed_identity_token(audience):
+    token = mi_auth_client.acquire_token_for_client(resource=audience)
+
+    if "access_token" in token:
+        return token["access_token"]
+    else:
+        raise Exception(f"Failed to acquire token: {token.get('error_description', 'Unknown error')}")
+
