@@ -160,8 +160,7 @@ __COMMON_STYLES__
                 context.Trace($"Error retrieving client URI: {ex.Message}");
                 return "N/A";
             }
-        }" />
-          <!-- Define common CSS for reuse in both consent and access denied pages -->
+        }" />          <!-- Define common CSS for reuse in both consent and access denied pages -->
         <set-variable name="common_styles" value="@{
             return @"        body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -169,52 +168,46 @@ __COMMON_STYLES__
             margin: 0;            padding: 0;
             line-height: 1.6;
             min-height: 100vh;
-            background: linear-gradient(135deg, #1a1f35, #2d3250, #4a3a8c);
-            color: #222;
+            background: linear-gradient(135deg, #1f1f1f, #333344, #3f4066); /* Modern dark gradient */
+            color: #333333;
             display: flex;
             justify-content: center;
             align-items: center;
-        }
-        .container, .consent-container {
+        }.container, .consent-container {
             background-color: #ffffff;
-            border-radius: 12px;
+            border-radius: 4px; /* Adding some subtle rounding */
             padding: 30px;
             max-width: 600px;            width: 90%;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        
-        .container {
-            text-align: center;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            border: none;
         }
         
         h1 {
             margin-bottom: 20px;
-            border-bottom: 1px solid rgba(100, 100, 180, 0.2);
+            border-bottom: 1px solid #EDEBE9;
             padding-bottom: 10px;
-        }        
+            font-weight: 500;
+        }
         .consent-heading {
-            color: #324180;
+            color: #0078D4; /* Microsoft Blue */
         }
         .denial-heading {
-            color: #d32f2f;
+            color: #D83B01; /* Microsoft Attention color */
         }
         
         p {
             margin: 15px 0;
             line-height: 1.7;
-            color: #1a1a1a;
-        }
-          .client-info {
-            background-color: #ffffff;
+            color: #323130; /* Microsoft text color */
+        }          .client-info {
+            background-color: #F5F5F5; /* Light gray background for info boxes */
             padding: 15px;
-            border-radius: 8px;
+            border-radius: 4px; /* Adding some subtle rounding */
             margin: 15px 0;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            border: 1px solid rgba(0, 0, 0, 0.05);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            border: 1px solid #EDEBE9;
         }
-        
-        .client-info p {
+          .client-info p {
             display: flex;
             align-items: flex-start;
             margin: 8px 0;
@@ -225,21 +218,21 @@ __COMMON_STYLES__
             flex-shrink: 0;
             text-align: left;
             padding-right: 15px;
+            color: #0078D4; /* Microsoft Blue */
         }
-        
-        .client-info code {
+          .client-info code {
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
             background-color: rgba(240, 240, 250, 0.5);
             padding: 2px 6px;
-            border-radius: 4px;
-            color: #4b6cb7;
+            border-radius: 4px; /* Adding some subtle rounding */
+            color: #0078D4; /* Microsoft Blue */
             word-break: break-all;
         }
-        
-        .btn {
+          .btn {
             display: inline-block;
-            padding: 10px 20px;            margin: 10px 0;
-            border-radius: 6px;
+            padding: 8px 16px;
+            margin: 10px 0;
+            border-radius: 4px; /* Adding some subtle rounding */
             text-decoration: none;
             font-weight: 600;
             cursor: pointer;
@@ -247,23 +240,25 @@ __COMMON_STYLES__
         }
         
         .btn-primary {
-            background-color: #324180;
-            color: white;            border: none;
+            background-color: #0078D4; /* Microsoft Blue */
+            color: white;
+            border: none;
         }
         .btn-primary:hover {
-            background-color: #485da0;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            background-color: #106EBE; /* Microsoft Blue hover */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
         
         .btn-secondary {
-            background-color: rgba(180, 30, 30, 0.9);
-            color: white;            border: 1px solid rgba(220, 100, 100, 0.3);
+            background-color: #D83B01; /* Microsoft Red */
+            color: white; /* White text */
+            border: none;
         }
         .btn-secondary:hover {
-            background-color: rgba(211, 47, 47, 1);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);        }
-        
-        .buttons {
+            background-color: #A80000; /* Darker red on hover */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+          .buttons {
             margin-top: 20px;
             display: flex;
             gap: 10px;
@@ -271,22 +266,23 @@ __COMMON_STYLES__
         }
         
         a {
-            color: #324180;
+            color: #0078D4; /* Microsoft Blue */
             text-decoration: none;
             font-weight: 600;
         }
         a:hover {
             text-decoration: underline;
         }
-        strong {            color: #324180;
-            font-weight: 700;
-        }
-          .error-message {
-            background-color: #fff8f8;
+        strong {
+            color: #0078D4; /* Microsoft Blue */
+            font-weight: 600;
+        }          .error-message {
+            background-color: #FDE7E9; /* Light red background */
             padding: 15px;
             margin: 15px 0;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+            border-radius: 4px; /* Adding some subtle rounding */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            border-left: 3px solid #D83B01; /* Microsoft Attention color */
         }
         
         .error-message p {
@@ -295,7 +291,7 @@ __COMMON_STYLES__
         
         .error-message p:first-child {
             font-weight: 500;
-            color: #d32f2f;
+            color: #D83B01; /* Microsoft Attention color */
         }";
         }" />          <!-- Consolidate CSS code blocks to reuse common_styles -->        <set-variable name="consent_page_template" value="@{
             return @"<!DOCTYPE html>
@@ -304,8 +300,7 @@ __COMMON_STYLES__
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <title>Application Consent</title>
     <style>
-__COMMON_STYLES__
-    /* Additional styles for scopes list */
+__COMMON_STYLES__    /* Additional styles for scopes list */
     .scopes-list {
         margin: 0;
         padding-left: 0;
@@ -334,9 +329,7 @@ __COMMON_STYLES__
             <ul class='scopes-list'>
                 <li>__OAUTH_SCOPES__</li>
             </ul>
-        </div>
-
-        <div class='buttons'>
+        </div>        <div class='buttons'>
             <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
                 <input type='hidden' name='client_id' value='__CLIENT_ID__'>
                 <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
