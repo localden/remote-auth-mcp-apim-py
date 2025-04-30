@@ -210,13 +210,12 @@ __COMMON_STYLES__
         <set-variable name="common_styles" value="@{
             return @"
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;            max-width: 100%;
-            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;            max-width: 100%;            margin: 0;
             padding: 0;
             line-height: 1.6;
             min-height: 100vh;
-            background: linear-gradient(135deg, #5f6db3, #7986cb, #9fa8da);
-            color: #333;
+            background: linear-gradient(135deg, #2d3250, #424778, #5755a1);
+            color: #222;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -237,22 +236,23 @@ __COMMON_STYLES__
             margin-bottom: 20px;
             border-bottom: 1px solid rgba(100, 100, 180, 0.2);
             padding-bottom: 10px;
-        }
-        .consent-heading {
-            color: #4b6cb7;
+        }        .consent-heading {
+            color: #324180;
         }
         .denial-heading {
-            color: #e74c3c;
+            color: #d32f2f;
         }
         p {
             margin: 15px 0;
             line-height: 1.7;
+            color: #1a1a1a;
         }        .client-info {
             background-color: #ffffff;
             padding: 15px;
             border-radius: 8px;
             margin: 15px 0;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(0, 0, 0, 0.05);
         }.btn {
             display: inline-block;
             padding: 10px 20px;
@@ -262,23 +262,21 @@ __COMMON_STYLES__
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
-        }
-        .btn-primary {
-            background-color: #4b6cb7;
+        }        .btn-primary {
+            background-color: #324180;
             color: white;
             border: none;
         }
         .btn-primary:hover {
-            background-color: #5a7bd0;
+            background-color: #485da0;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-        .btn-secondary {
-            background-color: rgba(180, 60, 60, 0.8);
+        }        .btn-secondary {
+            background-color: rgba(180, 30, 30, 0.9);
             color: white;
             border: 1px solid rgba(220, 100, 100, 0.3);
         }
         .btn-secondary:hover {
-            background-color: rgba(200, 70, 70, 0.9);
+            background-color: rgba(211, 47, 47, 1);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
         }
         .buttons {
@@ -286,20 +284,19 @@ __COMMON_STYLES__
             display: flex;
             gap: 10px;
             justify-content: flex-start;
-        }
-        a {
-            color: #4b6cb7;
+        }        a {
+            color: #324180;
             text-decoration: none;
+            font-weight: 600;
         }
         a:hover {
             text-decoration: underline;
         }
         strong {
-            color: #4b6cb7;
-        }
-        .error-message {
+            color: #324180;
+            font-weight: 700;
+        }        .error-message {
             background-color: #fff8f8;
-            border-left: 3px solid #e74c3c;
             padding: 15px;
             margin: 15px 0;
             border-radius: 8px;
@@ -348,7 +345,7 @@ __COMMON_STYLES__
     <div class='consent-container'>
         <h1 class='consent-heading'>Application Access Request</h1>
 
-        <p>The following application is requesting access to <strong>{{MCPServerName}}</strong>, which might include access to everything </strong>{{MCPServerName}}</strong> has been and will be granted access to.</p>
+        <p>The following application is requesting access to <strong>{{MCPServerName}}</strong>, which might include access to everything <strong>{{MCPServerName}}</strong> has been and will be granted access to.</p>
         
         <div class='client-info'>
             <p><strong>Application Name:</strong> <code>__CLIENT_NAME__</code></p>
@@ -1004,11 +1001,15 @@ __COMMON_STYLES__
                                     template = template.Replace("__CLIENT_ID__", clientId);
                                     template = template.Replace("__REDIRECT_URI__", normalizedRedirectUri); // Human-readable for display
                                     template = template.Replace("__STATE__", state);
-                                    template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");
-                                      // Handle space-separated OAuth scopes and create individual list items
+                                    template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");                                    // Handle space-separated OAuth scopes and create individual list items
                                     string[] scopeArray = oauthScopes.Split(new char[] {' '}, StringSplitOptions.RemoveEmptyEntries);
-                                    string scopeListItems = string.Join("</li>\n                <li>", scopeArray);
-                                    template = template.Replace("__OAUTH_SCOPES__", scopeListItems);
+                                    StringBuilder scopeList = new StringBuilder();
+                                    
+                                    foreach (string scope in scopeArray) {
+                                        scopeList.AppendLine($"<li><code>{scope}</code></li>");
+                                    }
+                                    
+                                    template = template.Replace("__OAUTH_SCOPES__", scopeList.ToString());
                                     
                                     // Finally, replace our placeholder with the encoded URI for form submission
                                     template = template.Replace(FORM_FIELD_PLACEHOLDER, originalRedirectUri);
