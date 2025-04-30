@@ -10,14 +10,12 @@
     4. Store consent status and redirect to original flow
 -->
 <policies>
-    <inbound>        <base />
-        <!-- Extract parameters from request -->
-        <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
-        <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />       
-        <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
-          <!-- Define common CSS placeholder for reference only - using common_styles below -->
-        <!-- The actual CSS definition is in common_styles below --><!-- HTML template for access denied page -->
-        <set-variable name="access_denied_template" value="@{
+    <inbound>        <base />        <!-- Extract parameters from request -->
+        <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault(&quot;client_id&quot;, &quot;&quot;))" />
+        <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault(&quot;redirect_uri&quot;, &quot;&quot;))" />       
+        <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault(&quot;state&quot;, &quot;&quot;))" /><!-- Define common CSS placeholder for reference only - using common_styles below -->
+        <!-- The actual CSS definition is in common_styles below --><!-- HTML template for access denied page -->        
+         <set-variable name="access_denied_template" value="@{
             return @"<!DOCTYPE html>
 <html lang='en'>
 <head>
@@ -26,20 +24,88 @@
     <title>Access Denied</title>
     <style>
 __COMMON_STYLES__
+    /* Additional styles for field alignment */
+    .client-info p {
+        display: flex;
+        align-items: flex-start;
+        margin: 8px 0;
+    }
+    .client-info strong {
+        min-width: 160px;
+        flex-shrink: 0;
+        text-align: right;
+        padding-right: 15px;
+    }
+    .client-info code {
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        background-color: rgba(240, 240, 250, 0.5);
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #4b6cb7;
+        word-break: break-all;
+    }
     </style>
 </head>
 <body>
     <div class='consent-container'>
         <h1 class='denial-heading'>Access Denied</h1>
-        <p>__DENIAL_MESSAGE__</p>
-        <p>The application will not be able to access your data.</p>
+        <div class='error-message'>
+            <p>__DENIAL_MESSAGE__</p>
+            <p>The application will not be able to access your data.</p>
+        </div>
         <p>You can close this window safely.</p>
     </div>
 </body>
 </html>";
         }" />
-          <!-- Initial placeholder for consent page template - using the improved version below -->
-        <!-- The actual improved template is defined below -->
+            <!-- HTML template for client not found error page -->
+        <set-variable name="client_not_found_template" value="@{
+            return @"<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Client Not Found</title>
+    <style>
+__COMMON_STYLES__
+    /* Additional styles for field alignment */
+    .client-info p {
+        display: flex;
+        align-items: flex-start;
+        margin: 8px 0;
+    }
+    .client-info strong {
+        min-width: 160px;
+        flex-shrink: 0;
+        text-align: right;
+        padding-right: 15px;
+    }
+    .client-info code {
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        background-color: rgba(240, 240, 250, 0.5);
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: #4b6cb7;
+        word-break: break-all;
+    }
+    </style>
+</head>
+<body>
+    <div class='consent-container'>
+        <h1 class='denial-heading'>Client Not Found</h1>
+        <div class='error-message'>
+            <p>The client registration for the specified client was not found.</p>
+            <div class='client-info'>
+                <p><strong>Client ID:</strong> <code>__CLIENT_ID__</code></p>
+                <p><strong>Redirect URI:</strong> <code>__REDIRECT_URI__</code></p>
+            </div>
+        </div>
+        <p>Please ensure that you are using a properly registered client application.</p>
+        <p>You can close this window safely.</p>
+    </div>
+</body>
+</html>";
+        }" />
           <!-- Explicitly normalize the redirect_uri by decoding it once -->
         <set-variable name="normalized_redirect_uri" value="@{
             string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
@@ -47,7 +113,100 @@ __COMMON_STYLES__
             return System.Net.WebUtility.UrlDecode(redirectUri);
         }" />
         
-        <!-- Define common CSS for reuse in both consent and access denied pages -->
+        <!-- Look up client information from cache -->
+        <cache-lookup-value key="@($"ClientInfo-{context.Variables.GetValueOrDefault<string>("client_id")}")" variable-name="clientInfoJson" />
+        
+        <!-- Look up OAuth scopes from named value -->
+        <set-variable name="oauth_scopes" value="{{OAuthScopes}}" />
+          <!-- Check if client exists in cache -->
+        <set-variable name="is_client_registered" value="@{
+            try {
+                string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                
+                if (string.IsNullOrEmpty(clientId)) {
+                    return false;
+                }
+                
+                // Get the client info from the variable set by cache-lookup-value
+                string clientInfoJson = context.Variables.GetValueOrDefault<string>("clientInfoJson");
+                  if (string.IsNullOrEmpty(clientInfoJson)) {
+                    context.Trace($"Client info not found in cache for client_id: {clientId}");
+                    return false;
+                }
+                
+                // Parse client info
+                JObject clientInfo = JObject.Parse(clientInfoJson);
+                JArray redirectUris = clientInfo["redirect_uris"]?.ToObject<JArray>();
+                
+                // Check if the redirect URI is in the registered URIs
+                if (redirectUris != null) {
+                    foreach (var uri in redirectUris) {
+                        // Normalize the URI from the cache for comparison
+                        string registeredUri = System.Net.WebUtility.UrlDecode(uri.ToString());
+                        if (registeredUri == redirectUri) {
+                            return true;
+                        }
+                    }
+                }
+                
+                context.Trace($"Redirect URI mismatch - URI: {redirectUri} not found in registered URIs");
+                return false;
+            }
+            catch (Exception ex) {
+                context.Trace($"Error checking client registration: {ex.Message}");
+                return false;
+            }
+        }" />        <!-- Get client name and URI from cache -->
+        <set-variable name="client_name" value="@{
+            try {
+                string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                
+                if (string.IsNullOrEmpty(clientId)) {
+                    return "Unknown Application";
+                }
+                
+                // Get the client info from the variable set by cache-lookup-value
+                string clientInfoJson = context.Variables.GetValueOrDefault<string>("clientInfoJson");
+                
+                if (string.IsNullOrEmpty(clientInfoJson)) {
+                    return clientId; // Fall back to client ID if no name found
+                }
+                
+                // Parse client info
+                JObject clientInfo = JObject.Parse(clientInfoJson);
+                string clientName = clientInfo["client_name"]?.ToString();
+                
+                return string.IsNullOrEmpty(clientName) ? clientId : clientName;
+            }
+            catch (Exception ex) {
+                context.Trace($"Error retrieving client name: {ex.Message}");
+                return context.Variables.GetValueOrDefault<string>("client_id", "Unknown Application");
+            }
+        }" />
+        
+        <!-- Get client URI from cache -->
+        <set-variable name="client_uri" value="@{
+            try {
+                // Get the client info from the variable set by cache-lookup-value
+                string clientInfoJson = context.Variables.GetValueOrDefault<string>("clientInfoJson");
+                
+                if (string.IsNullOrEmpty(clientInfoJson)) {
+                    return "N/A"; // No client URI available
+                }
+                
+                // Parse client info
+                JObject clientInfo = JObject.Parse(clientInfoJson);
+                string clientUri = clientInfo["client_uri"]?.ToString();
+                
+                return string.IsNullOrEmpty(clientUri) ? "N/A" : clientUri;
+            }
+            catch (Exception ex) {
+                context.Trace($"Error retrieving client URI: {ex.Message}");
+                return "N/A";
+            }
+        }" />
+          <!-- Define common CSS for reuse in both consent and access denied pages -->
         <set-variable name="common_styles" value="@{
             return @"
         body {
@@ -57,48 +216,47 @@ __COMMON_STYLES__
             padding: 0;
             line-height: 1.6;
             min-height: 100vh;
-            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
-            color: #e4e4e4;
+            background: linear-gradient(135deg, #f5f7fa, #e8ebf2, #dfe6f5);
+            color: #333;
             display: flex;
             justify-content: center;
             align-items: center;
         }
         .container, .consent-container {
-            background-color: rgba(30, 30, 50, 0.8);
+            background-color: #ffffff;
             border-radius: 12px;
             padding: 30px;
             max-width: 600px;
             width: 90%;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(5px);
-            border: 1px solid rgba(100, 100, 180, 0.2);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(100, 100, 180, 0.1);
         }
         .container {
             text-align: center;
         }
         h1 {
             margin-bottom: 20px;
-            border-bottom: 1px solid rgba(100, 100, 180, 0.3);
+            border-bottom: 1px solid rgba(100, 100, 180, 0.2);
             padding-bottom: 10px;
         }
         .consent-heading {
-            color: #8e9aff;
+            color: #4b6cb7;
         }
         .denial-heading {
-            color: #ff7878;
+            color: #e74c3c;
         }
         p {
             margin: 15px 0;
             line-height: 1.7;
         }
         .client-info {
-            background-color: rgba(40, 40, 70, 0.5);
+            background-color: #ffffff;
             padding: 15px;
             border-radius: 8px;
             margin: 15px 0;
-            border-left: 3px solid #8e9aff;
-        }
-        .btn {
+            border-left: 3px solid #4b6cb7;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+        }        .btn {
             display: inline-block;
             padding: 10px 20px;
             margin: 10px 0;
@@ -119,7 +277,7 @@ __COMMON_STYLES__
         }
         .btn-secondary {
             background-color: rgba(180, 60, 60, 0.8);
-            color: #e4e4e4;
+            color: white;
             border: 1px solid rgba(220, 100, 100, 0.3);
         }
         .btn-secondary:hover {
@@ -133,17 +291,24 @@ __COMMON_STYLES__
             justify-content: flex-start;
         }
         a {
-            color: #8e9aff;
+            color: #4b6cb7;
             text-decoration: none;
         }
         a:hover {
             text-decoration: underline;
         }
         strong {
-            color: #a0b0ff;
+            color: #4b6cb7;
+        }
+        .error-message {
+            background-color: #fff8f8;
+            border-left: 3px solid #e74c3c;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
         }";
-        }" />          <!-- Consolidate CSS code blocks to reuse common_styles -->
-        <set-variable name="consent_page_template" value="@{
+        }" />          <!-- Consolidate CSS code blocks to reuse common_styles -->        <set-variable name="consent_page_template" value="@{
             return @"<!DOCTYPE html>
 <html lang='en'>
 <head>
@@ -157,32 +322,50 @@ __COMMON_STYLES__
         display: flex;
         align-items: flex-start;
         margin: 8px 0;
-    }
-    .client-info strong {
-        min-width: 130px;
+    }    .client-info strong {
+        min-width: 160px;
         flex-shrink: 0;
+        text-align: left;
+        padding-right: 15px;
     }
     .client-info code {
         font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-        background-color: rgba(30, 30, 50, 0.5);
+        background-color: rgba(240, 240, 250, 0.5);
         padding: 2px 6px;
         border-radius: 4px;
-        color: #a0e0ff;
+        color: #4b6cb7;
         word-break: break-all;
+    }
+    .scopes-list {
+        margin: 0;
+        padding-left: 0;
+    }
+    .scopes-list li {
+        list-style-type: none;
+        padding: 4px 0;
+        display: flex;
     }
     </style>
 </head>
 <body>
     <div class='consent-container'>
         <h1 class='consent-heading'>Application Access Request</h1>
-        <p>The following application is requesting authorization against the MCP server:</p>
+
+        <p>The following application is requesting access to <strong>{{MCPServerName}}</strong>, which might include access to everything </strong>{{MCPServerName}}</strong> has been and will be granted access to.</p>
         
         <div class='client-info'>
+            <p><strong>Application Name:</strong> <code>__CLIENT_NAME__</code></p>
+            <p><strong>Application Website:</strong> <code>__CLIENT_URI__</code></p>
             <p><strong>Application ID:</strong> <code>__CLIENT_ID__</code></p>
             <p><strong>Redirect URI:</strong> <code>__REDIRECT_URI__</code></p>
+        </div>        
+        <p>The application will have access to the following scopes, used by <strong>{{MCPServerName}}</strong>:</p>
+        <div class='client-info'>
+            <ul class='scopes-list'>
+                <li>__OAUTH_SCOPES__</li>
+            </ul>
         </div>
-        
-        <p>By allowing access, you are permitting this application to be authorized against the MCP server and have access to your user data.</p>
+
         <div class='buttons'>
             <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
                 <input type='hidden' name='client_id' value='__CLIENT_ID__'>
@@ -197,8 +380,7 @@ __COMMON_STYLES__
                 <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
                 <input type='hidden' name='state' value='__STATE__'>
                 <input type='hidden' name='consent_action' value='deny'>
-                <button type='submit' class='btn btn-secondary'>Deny</button>
-            </form>
+                <button type='submit' class='btn btn-secondary'>Deny</button>            </form>
         </div>
     </div>
 </body>
@@ -755,61 +937,98 @@ __COMMON_STYLES__
                             }</set-body>
                         </return-response>
                     </when>
-                    
-                    <!-- If no cookies found, show the consent screen -->
+                      <!-- If no cookies found, show the consent screen -->
                     <otherwise>
-                        <!-- Set client name to the client ID since we're not storing client info in cache anymore -->
-                        <set-variable name="client_name" value="@(context.Variables.GetValueOrDefault<string>("client_id") ?? "Unknown Application")" />                        <!-- Use the main consent template instead of separate head/body templates -->                        <!-- Using main consent template defined below -->                        <!-- Build consent page using the standardized template -->
-                        <set-variable name="consent_page" value="@{
-                            string template = context.Variables.GetValueOrDefault<string>("consent_page_template");
-                            string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
-                            
-                            // Use the service URL from APIM configuration
-                            string basePath = "{{APIMGatewayURL}}";
-                            
-                            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                            
-                            // Get the normalized (human-readable) redirect URI for display
-                            string normalizedRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                            context.Trace($"DEBUG: Normalized redirect URI for display: {normalizedRedirectUri}");
-                            
-                            // Use the original encoded version for form submission
-                            string originalRedirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
-                            context.Trace($"DEBUG: Original redirect URI for form: {originalRedirectUri}");
-                            
-                            string state = context.Variables.GetValueOrDefault<string>("state", "");
-                            
-                            // Create a temporary placeholder for the form fields
-                            string FORM_FIELD_PLACEHOLDER = "___ENCODED_REDIRECT_URI___";
-                            
-                            // Replace the styles first
-                            template = template.Replace("__COMMON_STYLES__", commonStyles);
-                            
-                            // First, create a temporary placeholder for the form fields
-                            template = template.Replace("value='__REDIRECT_URI__'", "value='" + FORM_FIELD_PLACEHOLDER + "'");
-                            
-                            // Now replace the display values with human-readable versions
-                            template = template.Replace("__CLIENT_ID__", clientId);
-                            template = template.Replace("__REDIRECT_URI__", normalizedRedirectUri); // Human-readable for display
-                            template = template.Replace("__STATE__", state);
-                            template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");
-                            
-                            // Finally, replace our placeholder with the encoded URI for form submission
-                            template = template.Replace(FORM_FIELD_PLACEHOLDER, originalRedirectUri);
-                            
-                            return template;
-                        }" />
-                        
-                        <!-- Return the consent page -->
-                        <return-response>
-                            <set-status code="200" reason="OK" />
-                            <set-header name="Content-Type" exists-action="override">
-                                <value>text/html</value>
-                            </set-header>
-                            <set-body>@{
-                                return context.Variables.GetValueOrDefault<string>("consent_page", "");
-                            }</set-body>
-                        </return-response>
+                        <!-- Check if client is registered first -->
+                        <choose>
+                            <when condition="@(!context.Variables.GetValueOrDefault<bool>("is_client_registered"))">
+                                <!-- Client is not registered, show error page -->
+                                <return-response>
+                                    <set-status code="403" reason="Forbidden" />
+                                    <set-header name="Content-Type" exists-action="override">
+                                        <value>text/html</value>
+                                    </set-header>
+                                    <set-header name="Cache-Control" exists-action="override">
+                                        <value>no-store, no-cache</value>
+                                    </set-header>
+                                    <set-header name="Pragma" exists-action="override">
+                                        <value>no-cache</value>
+                                    </set-header>
+                                    <set-body>@{
+                                        string template = context.Variables.GetValueOrDefault<string>("client_not_found_template");
+                                        string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+                                        string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                                        string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                                        
+                                        // Replace placeholders with actual content
+                                        template = template.Replace("__COMMON_STYLES__", commonStyles);
+                                        template = template.Replace("__CLIENT_ID__", clientId);
+                                        template = template.Replace("__REDIRECT_URI__", redirectUri);
+                                        
+                                        return template;
+                                    }</set-body>
+                                </return-response>
+                            </when>
+                            <otherwise>                                <!-- Client is registered, get client name from the cache -->
+                                <!-- Build consent page using the standardized template -->
+                                <set-variable name="consent_page" value="@{
+                                    string template = context.Variables.GetValueOrDefault<string>("consent_page_template");
+                                    string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+                                    
+                                    // Use the service URL from APIM configuration
+                                    string basePath = "{{APIMGatewayURL}}";
+                                    
+                                    string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                                    string clientName = context.Variables.GetValueOrDefault<string>("client_name", "Unknown Application");
+                                    string clientUri = context.Variables.GetValueOrDefault<string>("client_uri", "N/A");
+                                    string oauthScopes = context.Variables.GetValueOrDefault<string>("oauth_scopes", "");
+                                    
+                                    // Get the normalized (human-readable) redirect URI for display
+                                    string normalizedRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                                    context.Trace($"DEBUG: Normalized redirect URI for display: {normalizedRedirectUri}");
+                                    
+                                    // Use the original encoded version for form submission
+                                    string originalRedirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                                    context.Trace($"DEBUG: Original redirect URI for form: {originalRedirectUri}");
+                                    
+                                    string state = context.Variables.GetValueOrDefault<string>("state", "");
+                                    
+                                    // Create a temporary placeholder for the form fields
+                                    string FORM_FIELD_PLACEHOLDER = "___ENCODED_REDIRECT_URI___";
+                                    
+                                    // Replace the styles first
+                                    template = template.Replace("__COMMON_STYLES__", commonStyles);
+                                    
+                                    // First, create a temporary placeholder for the form fields
+                                    template = template.Replace("value='__REDIRECT_URI__'", "value='" + FORM_FIELD_PLACEHOLDER + "'");
+                                    
+                                    // Now replace the display values with human-readable versions
+                                    template = template.Replace("__CLIENT_NAME__", clientName);
+                                    template = template.Replace("__CLIENT_URI__", clientUri);
+                                    template = template.Replace("__CLIENT_ID__", clientId);
+                                    template = template.Replace("__REDIRECT_URI__", normalizedRedirectUri); // Human-readable for display
+                                    template = template.Replace("__STATE__", state);
+                                    template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");
+                                    template = template.Replace("__OAUTH_SCOPES__", oauthScopes);
+                                    
+                                    // Finally, replace our placeholder with the encoded URI for form submission
+                                    template = template.Replace(FORM_FIELD_PLACEHOLDER, originalRedirectUri);
+                                    
+                                    return template;
+                                }" />
+                                
+                                <!-- Return the consent page -->
+                                <return-response>
+                                    <set-status code="200" reason="OK" />
+                                    <set-header name="Content-Type" exists-action="override">
+                                        <value>text/html</value>
+                                    </set-header>
+                                    <set-body>@{
+                                        return context.Variables.GetValueOrDefault<string>("consent_page", "");
+                                    }</set-body>
+                                </return-response>
+                            </otherwise>
+                        </choose>
                     </otherwise>
                 </choose>
             </otherwise>

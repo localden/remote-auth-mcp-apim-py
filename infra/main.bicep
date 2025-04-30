@@ -40,6 +40,7 @@ param mcpEntraClientApplicationUniqueName string = ''
 param mcpEntraOBOResourceApplicationUniqueName string = ''
 param mcpEntraOBOResourceApplicationDisplayName string = ''
 param disableLocalAuth bool = true
+param mcpServerName string = 'Mini MCP Server'
 
 // MCP Client APIM gateway specific variables
 var abbrs = loadJsonContent('./abbreviations.json')
@@ -88,6 +89,7 @@ module oauthAPIModule './app/apim-oauth/oauth.bicep' = {
     apimServiceName: apimService.name
     entraAppUserAssignedIdentityPrincipleId: apimService.outputs.entraAppUserAssignedIdentityPrincipleId
     entraAppUserAssignedIdentityClientId: apimService.outputs.entraAppUserAssignedIdentityClientId
+    mcpServerName: mcpServerName
   }
 }
 

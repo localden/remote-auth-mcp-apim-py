@@ -16,12 +16,14 @@ param entraClientAppUniqueName string
 @description('The display name of the Entra application')
 param entraClientAppDisplayName string
 
-
 @description('The name of the Entra application')
 param entraResourceAppUniqueName string
 
 @description('The display name of the Entra application')
 param entraResourceAppDisplayName string
+
+@description('The name of the MCP Server to display in the consent page')
+param mcpServerName string = 'MCP Server'
 
 resource apimService 'Microsoft.ApiManagement/service@2021-08-01' existing = {
   name: apimServiceName
@@ -167,6 +169,16 @@ resource OAuthBaseUrlNamedValue 'Microsoft.ApiManagement/service/namedValues@202
   properties: {
     displayName: 'OAuthBaseUrl'
     value: apimService.properties.gatewayUrl
+    secret: false
+  }
+}
+
+resource MCPServerNamedValue 'Microsoft.ApiManagement/service/namedValues@2021-08-01' = {
+  parent: apimService
+  name: 'MCPServerName'
+  properties: {
+    displayName: 'MCPServerName'
+    value: mcpServerName
     secret: false
   }
 }
