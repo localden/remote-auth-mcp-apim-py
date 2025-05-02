@@ -35,10 +35,6 @@ param logAnalyticsName string = ''
 param resourceGroupName string = ''
 param storageAccountName string = ''
 param vNetName string = ''
-param mcpEntraClientApplicationDisplayName string = ''
-param mcpEntraClientApplicationUniqueName string = ''
-param mcpEntraOBOResourceApplicationUniqueName string = ''
-param mcpEntraOBOResourceApplicationDisplayName string = ''
 param disableLocalAuth bool = true
 param mcpServerName string = 'Mini MCP Server'
 
@@ -74,18 +70,8 @@ module oauthAPIModule './app/apim-oauth/oauth.bicep' = {
   scope: rg
   params: {
     location: location
-    entraClientAppUniqueName: !empty(mcpEntraClientApplicationUniqueName)
-      ? mcpEntraClientApplicationUniqueName
-      : 'mcp-obo-client-oauth--${abbrs.applications}${apimResourceToken}'
-    entraClientAppDisplayName: !empty(mcpEntraClientApplicationDisplayName)
-      ? mcpEntraClientApplicationDisplayName
-      : 'MCP-OBO-Client-OAuth-${abbrs.applications}-${apimResourceToken}'
-    entraResourceAppUniqueName: !empty(mcpEntraOBOResourceApplicationUniqueName)
-      ? mcpEntraOBOResourceApplicationUniqueName
-      : 'mcp-obo-resource-oauth--${abbrs.applications}${apimResourceToken}'
-    entraResourceAppDisplayName: !empty(mcpEntraOBOResourceApplicationDisplayName)
-      ? mcpEntraOBOResourceApplicationDisplayName
-      : 'MCP-OBO-Resource-OAuth-${abbrs.applications}-${apimResourceToken}'
+    entraResourceAppUniqueName: 'mcp-obo-resource-oauth--${abbrs.applications}${apimResourceToken}'
+    entraResourceAppDisplayName: mcpServerName
     apimServiceName: apimService.name
     entraAppUserAssignedIdentityPrincipleId: apimService.outputs.entraAppUserAssignedIdentityPrincipleId
     entraAppUserAssignedIdentityClientId: apimService.outputs.entraAppUserAssignedIdentityClientId

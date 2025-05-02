@@ -12,8 +12,8 @@ param tenantId string = tenant().tenantId
 @description('The principle id of the user-assigned managed identity')
 param userAssignedIdentityPrincipleId string
 
-@description('The scope ID for adding a new permission scope for the resource app')
-param scopeId string = newGuid()
+@description('The OAuth callback URL for the API Management service')
+param apimOauthCallback string
 
 var loginEndpoint = environment().authentication.loginEndpoint
 var issuer = '${loginEndpoint}${tenantId}/v2.0'
@@ -22,27 +22,10 @@ resource entraResourceApp 'Microsoft.Graph/applications@v1.0' = {
 
   displayName: entraAppDisplayName
   uniqueName: entraAppUniqueName
-}
 
-resource entraResourceAppWithSettings 'Microsoft.Graph/applications@v1.0' = {
-
-  displayName: entraAppDisplayName
-  uniqueName: entraAppUniqueName
-  identifierUris: [
-    'api://${entraResourceApp.appId}'
-  ]
-  api: {
-    oauth2PermissionScopes: [
-      {
-        id: scopeId
-        adminConsentDescription: 'Access MCP Server Data'
-        adminConsentDisplayName: 'Access MCP Server Data'
-        isEnabled: true
-        type: 'User'
-        userConsentDescription: 'Access MCP Server Data'
-        userConsentDisplayName: 'Access MCP Server Data'
-        value: 'mcp.server.read'
-      }
+  web: {
+    redirectUris: [
+      apimOauthCallback
     ]
   }
   requiredResourceAccess: [
@@ -86,4 +69,3 @@ resource grants 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = {
 // Outputs
 output entraAppId string = entraResourceApp.appId
 output entraAppTenantId string = tenantId
-output entraAppScopeId string = entraResourceAppWithSettings.api.oauth2PermissionScopes[0].id

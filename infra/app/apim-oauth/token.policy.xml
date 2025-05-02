@@ -119,10 +119,9 @@
                 </return-response>
             </when>
         </choose>
-        
-        <!-- STEP 5.5: Verify client consent -->
-        <!-- Extract client ID from the token request -->
-        <set-variable name="clientId" value="@{
+          <!-- STEP 5.5: Verify client registration -->
+        <!-- Extract client ID and redirect URI from the token request -->
+        <set-variable name="client_id" value="@{
             // Retrieve the raw body string
             var body = context.Variables.GetValueOrDefault<string>("tokenRequestBody");
             if (!string.IsNullOrEmpty(body))
@@ -144,30 +143,91 @@
             return "";
         }" />
         
-        <!-- Check for consent cookie -->
-        <set-variable name="consentCookie" value="@{
-            string cookieName = $"MCP_CLIENT_CONSENT_{context.Variables.GetValueOrDefault<string>("clientId")}";
-            return context.Request.Headers.GetValueOrDefault("Cookie", "")
-                .Split(';')
-                .Select(c => c.Trim().Split('='))
-                .Where(c => c.Length == 2 && c[0] == cookieName)
-                .Select(c => c[1])
-                .FirstOrDefault() ?? "";
+        <set-variable name="redirect_uri" value="@{
+            // Retrieve the raw body string
+            var body = context.Variables.GetValueOrDefault<string>("tokenRequestBody");
+            if (!string.IsNullOrEmpty(body))
+            {
+                // Split the body into name/value pairs
+                var pairs = body.Split('&');
+                foreach (var pair in pairs)
+                {
+                    var keyValue = pair.Split('=');
+                    if (keyValue.Length == 2)
+                    {
+                        if(keyValue[0] == "redirect_uri")
+                        {
+                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
+                        }
+                    }
+                }
+            }
+            return "";
         }" />
         
-        <!-- Check if client has been consented to via cookie -->
+        <!-- Normalize the redirect URI -->
+        <set-variable name="normalized_redirect_uri" value="@{
+            string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+            return System.Net.WebUtility.UrlDecode(redirectUri);
+        }" />
+        
+        <!-- Look up client information from cache -->
+        <cache-lookup-value key="@($"ClientInfo-{context.Variables.GetValueOrDefault<string>("client_id")}")" variable-name="clientInfoJson" />
+        
+        <!-- Verify that the client exists and the redirect URI is valid -->
+        <set-variable name="is_client_registered" value="@{
+            try {
+                string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                
+                if (string.IsNullOrEmpty(clientId)) {
+                    return false;
+                }
+                
+                // Get the client info from the variable set by cache-lookup-value
+                string clientInfoJson = context.Variables.GetValueOrDefault<string>("clientInfoJson");
+                  if (string.IsNullOrEmpty(clientInfoJson)) {
+                    context.Trace($"Client info not found in cache for client_id: {clientId}");
+                    return false;
+                }
+                
+                // Parse client info
+                JObject clientInfo = JObject.Parse(clientInfoJson);
+                JArray redirectUris = clientInfo["redirect_uris"]?.ToObject<JArray>();
+                
+                // Check if the redirect URI is in the registered URIs
+                if (redirectUris != null) {
+                    foreach (var uri in redirectUris) {
+                        // Normalize the URI from the cache for comparison
+                        string registeredUri = System.Net.WebUtility.UrlDecode(uri.ToString());
+                        if (registeredUri == redirectUri) {
+                            return true;
+                        }
+                    }
+                }
+                
+                context.Trace($"Redirect URI mismatch - URI: {redirectUri} not found in registered URIs");
+                return false;
+            }
+            catch (Exception ex) {
+                context.Trace($"Error checking client registration: {ex.Message}");
+                return false;
+            }
+        }" />
+        
+        <!-- Check if client is properly registered -->
         <choose>
-            <when condition="@(context.Variables.GetValueOrDefault<string>("consentCookie") != "granted")">
-                <!-- Client has not been consented to, return error -->
+            <when condition="@(!context.Variables.GetValueOrDefault<bool>("is_client_registered"))">
+                <!-- Client is not properly registered, return error -->
                 <return-response>
-                    <set-status code="403" reason="Forbidden" />
+                    <set-status code="401" reason="Unauthorized" />
                     <set-header name="Content-Type" exists-action="override">
                         <value>application/json</value>
                     </set-header>
                     <set-body>@{
                         var errorResponse = new JObject();
-                        errorResponse["error"] = "access_denied";
-                        errorResponse["error_description"] = "User consent required for this client application.";
+                        errorResponse["error"] = "invalid_client";
+                        errorResponse["error_description"] = "Client not found or redirect URI is invalid.";
                         return errorResponse.ToString();
                     }</set-body>
                 </return-response>
