@@ -61,11 +61,8 @@
                 </return-response>
             </when>
         </choose>
-        <!-- STEP 6: Lookup MCP client redirect URI stored during authorization -->
-        <cache-lookup-value key="@($"McpClientAuthData-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" variable-name="mcpClientData" />
-          <!-- Retrieve the client's redirect URI from cache -->
-        <cache-lookup-value key="ClientRedirectUri" variable-name="callbackRedirectUri" />
-          <!-- STEP 7: Generate secure session token for MCP client -->
+        
+        <!-- STEP 6: Generate secure session token for MCP client -->
         <set-variable name="IV" value="{{EncryptionIV}}" />
         <set-variable name="key" value="{{EncryptionKey}}" />
         <set-variable name="sessionId" value="@((string)Guid.NewGuid().ToString().Replace("-", ""))" />
@@ -83,11 +80,21 @@
             return Convert.ToBase64String(encryptedBytes);
         }" />
 
-        <!-- STEP 8: Generate new state for MCP client -->
-        <set-variable name="mcpState" value="@((string)Guid.NewGuid().ToString())" />
+        <!-- STEP 6: Lookup MCP client redirect URI stored during authorization -->
         <cache-lookup-value key="@((string)context.Variables.GetValueOrDefault("entraState"))" variable-name="mcpConfirmConsentCode" />
-        
-        <!-- STEP 9: Store the encrypted session key and Entra token in cache -->
+        <cache-lookup-value key="@($"McpClientAuthData-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" variable-name="mcpClientData" />
+
+        <!-- STEP 8: Extract the stored mcp client state from cache -->
+        <set-variable name="mcpState" value="@{
+            var mcpAuthDataAsJObject = JObject.Parse((string)context.Variables["mcpClientData"]);
+            return (string)mcpAuthDataAsJObject["mcpClientState"];
+        }" />
+        <!-- STEP 9: Extract the stored mcp client callback redirect uri from cache -->
+        <set-variable name="callbackRedirectUri" value="@{
+            var mcpAuthDataAsJObject = JObject.Parse((string)context.Variables["mcpClientData"]);
+            return mcpAuthDataAsJObject["mcpCallbackRedirectUri"];
+        }" />
+        <!-- STEP 10: Store the encrypted session key and Entra token in cache -->
         <!-- Store the encrypted session key with the MCP confirmation code as key -->
         <cache-store-value duration="3600" 
             key="@($"AccessToken-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" 
@@ -98,7 +105,7 @@
             key="@($"EntraToken-{context.Variables.GetValueOrDefault("sessionId")}")"
             value="@(context.Response.Body.As<JObject>(preserveContent: true).ToString())" />
         
-        <!-- STEP 10: Redirect back to MCP client with confirmation code -->
+        <!-- STEP 11: Redirect back to MCP client with confirmation code -->
         <return-response>
             <set-status code="302" reason="Found" />
             <set-header name="Location" exists-action="override">
