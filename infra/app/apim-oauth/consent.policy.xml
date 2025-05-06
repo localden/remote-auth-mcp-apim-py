@@ -10,11 +10,13 @@
     4. Store consent status and redirect to original flow
 -->
 <policies>
-    <inbound>        <base />        <!-- Extract parameters from request -->
-        <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault(&quot;client_id&quot;, &quot;&quot;))" />
-        <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault(&quot;redirect_uri&quot;, &quot;&quot;))" />       
-        <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault(&quot;state&quot;, &quot;&quot;))" /><!-- Define common CSS placeholder for reference only - using common_styles below -->
-        <!-- The actual CSS definition is in common_styles below --><!-- HTML template for access denied page -->        
+    <inbound>        
+        <base />        
+        <!-- Extract parameters from request -->
+        <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
+        <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />       
+        <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
+      
          <set-variable name="access_denied_template" value="@{
             return @"<!DOCTYPE html>
 <html lang='en'>
@@ -568,10 +570,51 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         <set-variable name="response_status_code" value="302" />
                         <set-variable name="response_redirect_location" value="@{
                             string baseUrl = "{{APIMGatewayURL}}";
-                            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                            // Use the original redirect URI as it's already encoded appropriately for a query parameter
-                            string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
-                            string state = context.Variables.GetValueOrDefault<string>("state", "");
+                            
+                            // Get client_id, redirect_uri, and state from form data first
+                            string clientId = "";
+                            string redirectUri = "";
+                            string state = "";
+                            
+                            string body = context.Request.Body.As<string>(preserveContent: true);
+                            string[] pairs = body.Split('&');
+                            foreach (string pair in pairs)
+                            {
+                                string[] keyValue = pair.Split('=');
+                                if (keyValue.Length == 2)
+                                {
+                                    if (keyValue[0] == "client_id")
+                                    {
+                                        clientId = System.Net.WebUtility.UrlDecode(keyValue[1]);
+                                    }
+                                    else if (keyValue[0] == "redirect_uri")
+                                    {
+                                        redirectUri = System.Net.WebUtility.UrlDecode(keyValue[1]);
+                                    }
+                                    else if (keyValue[0] == "state")
+                                    {
+                                        state = System.Net.WebUtility.UrlDecode(keyValue[1]);
+                                    }
+                                }
+                            }
+                            
+                            // If we couldn't extract the values from form data, fall back to context variables
+                            if (string.IsNullOrEmpty(clientId))
+                            {
+                                clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                            }
+                            
+                            if (string.IsNullOrEmpty(redirectUri))
+                            {
+                                redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                            }
+                            
+                            if (string.IsNullOrEmpty(state))
+                            {
+                                state = context.Variables.GetValueOrDefault<string>("state", "");
+                            }
+                            
+                            context.Trace($"DEBUG: Building redirect location with clientId: {clientId}, redirectUri: {redirectUri}, state: {state}");
                             
                             return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={redirectUri}&state={state}&consent=granted";
                         }" />

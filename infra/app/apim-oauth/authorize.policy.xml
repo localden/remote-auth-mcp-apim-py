@@ -20,6 +20,7 @@
         <set-variable name="clientId" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
         <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />
         <set-variable name="consentStatus" value="@((string)context.Request.Url.Query.GetValueOrDefault("consent", ""))" />
+        <set-variable name="currentState" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
         
         <!-- Check for consent cookie -->
         <set-variable name="consentCookie" value="@{
@@ -47,7 +48,7 @@
                     <set-header name="Location" exists-action="override">
                         <value>@{
                             string basePath = context.Request.OriginalUrl.Scheme + "://" + context.Request.OriginalUrl.Host + (context.Request.OriginalUrl.Port == 80 || context.Request.OriginalUrl.Port == 443 ? "" : ":" + context.Request.OriginalUrl.Port);
-                            return $"{basePath}/consent?client_id={context.Variables.GetValueOrDefault<string>("clientId")}&redirect_uri={context.Variables.GetValueOrDefault<string>("redirect_uri")}&state={context.Variables.GetValueOrDefault<string>("state")}";
+                            return $"{basePath}/consent?client_id={context.Variables.GetValueOrDefault<string>("clientId")}&redirect_uri={context.Variables.GetValueOrDefault<string>("redirect_uri")}&state={context.Variables.GetValueOrDefault<string>("currentState")}";
                         }</value>
                     </set-header>
                 </return-response>
