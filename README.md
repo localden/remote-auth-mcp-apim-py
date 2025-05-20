@@ -33,13 +33,20 @@ Follow these steps to get started.
     cd remote-auth-mcp-apim-py
     ```
 
-4. Log in to Azure Developer CLI:
+4. Ensure the `Microsoft.App` resource provider is registered on your subscription either on the [Azure portal](https://learn.microsoft.com/azure/azure-resource-manager/management/resource-providers-and-types#azure-portal) or by running the following [Azure CLI command](https://learn.microsoft.com/cli/azure/install-azure-cli?view=azure-cli-latest):
+
+    ```bash
+    az login
+    az provider register --namespace Microsoft.App --wait
+    ```
+
+5. Log in to Azure Developer CLI:
 
     ```bash
     azd auth login
     ```
 
-5. Deploy the project to Azure:
+6. Deploy the project to Azure:
 
     ```bash
     azd up
