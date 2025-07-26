@@ -981,7 +981,12 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             
                             context.Trace($"DEBUG: Building redirect location with clientId: {clientId}, redirectUri: {redirectUri}, state: {state}");
                             
-                            return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={redirectUri}&state={state}&consent=granted";
+                            // URL encode parameters to prevent injection attacks
+                            string encodedClientId = System.Net.WebUtility.UrlEncode(clientId);
+                            string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
+                            string encodedState = System.Net.WebUtility.UrlEncode(state);
+                            
+                            return $"{baseUrl}/authorize?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}&consent=granted";
                         }" />
                           <!-- Calculate the cookie value right here in inbound before returning response -->
                         <set-variable name="approval_cookie" value="@{
@@ -1278,7 +1283,12 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
                             string state = context.Variables.GetValueOrDefault<string>("state", "");
                             
-                            return $"{baseUrl}/authorize?client_id={clientId}&redirect_uri={redirectUri}&state={state}&consent=granted";
+                            // URL encode parameters to prevent injection attacks
+                            string encodedClientId = System.Net.WebUtility.UrlEncode(clientId);
+                            string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
+                            string encodedState = System.Net.WebUtility.UrlEncode(state);
+                            
+                            return $"{baseUrl}/authorize?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}&consent=granted";
                         }" />
                         
                         <!-- Redirect to authorization endpoint -->
@@ -1340,10 +1350,10 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                         string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
                                         string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                                         
-                                        // Replace placeholders with actual content
+                                        // Replace placeholders with HTML-encoded content to prevent XSS
                                         template = template.Replace("__COMMON_STYLES__", commonStyles);
-                                        template = template.Replace("__CLIENT_ID__", clientId);
-                                        template = template.Replace("__REDIRECT_URI__", redirectUri);
+                                        template = template.Replace("__CLIENT_ID__", System.Net.WebUtility.HtmlEncode(clientId));
+                                        template = template.Replace("__REDIRECT_URI__", System.Net.WebUtility.HtmlEncode(redirectUri));
                                         
                                         return template;
                                     }</set-body>
@@ -1382,25 +1392,27 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     
                                     // First, create a temporary placeholder for the form fields
                                     template = template.Replace("value='__REDIRECT_URI__'", "value='" + FORM_FIELD_PLACEHOLDER + "'");
-                                      // Now replace the display values with human-readable versions
-                                    template = template.Replace("__CLIENT_NAME__", clientName);
-                                    template = template.Replace("__CLIENT_URI__", clientUri);
-                                    template = template.Replace("__CLIENT_ID__", clientId);
-                                    template = template.Replace("__REDIRECT_URI__", normalizedRedirectUri); // Human-readable for display
-                                    template = template.Replace("__STATE__", state);
-                                    template = template.Replace("__CSRF_TOKEN__", csrfToken);
-                                    template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");                                    // Handle space-separated OAuth scopes and create individual list items
+                                      
+                                    // Replace template placeholders with HTML-encoded values to prevent XSS
+                                    template = template.Replace("__CLIENT_NAME__", System.Net.WebUtility.HtmlEncode(clientName));
+                                    template = template.Replace("__CLIENT_URI__", System.Net.WebUtility.HtmlEncode(clientUri));
+                                    template = template.Replace("__CLIENT_ID__", System.Net.WebUtility.HtmlEncode(clientId));
+                                    template = template.Replace("__REDIRECT_URI__", System.Net.WebUtility.HtmlEncode(normalizedRedirectUri));
+                                    template = template.Replace("__STATE__", System.Net.WebUtility.HtmlEncode(state));
+                                    template = template.Replace("__CSRF_TOKEN__", System.Net.WebUtility.HtmlEncode(csrfToken));
+                                    template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");                                    
+                                    // Handle space-separated OAuth scopes and create individual list items with HTML encoding
                                     string[] scopeArray = oauthScopes.Split(new char[] {' '}, StringSplitOptions.RemoveEmptyEntries);
                                     StringBuilder scopeList = new StringBuilder();
                                     
                                     foreach (string scope in scopeArray) {
-                                        scopeList.AppendLine($"<li><code>{scope}</code></li>");
+                                        scopeList.AppendLine($"<li><code>{System.Net.WebUtility.HtmlEncode(scope)}</code></li>");
                                     }
                                     
                                     template = template.Replace("__OAUTH_SCOPES__", scopeList.ToString());
                                     
-                                    // Finally, replace our placeholder with the encoded URI for form submission
-                                    template = template.Replace(FORM_FIELD_PLACEHOLDER, originalRedirectUri);
+                                    // Replace form field placeholder with HTML-encoded URI
+                                    template = template.Replace(FORM_FIELD_PLACEHOLDER, System.Net.WebUtility.HtmlEncode(originalRedirectUri));
                                     
                                     return template;
                                 }" />
