@@ -75,6 +75,30 @@ __COMMON_STYLES__
         
         <!-- Look up OAuth scopes from named value -->
         <set-variable name="oauth_scopes" value="{{OAuthScopes}}" />
+        
+        <!-- Generate CSRF token for consent forms -->
+        <set-variable name="csrf_token" value="@{
+            // Generate a random CSRF token using Guid and timestamp
+            string guidPart = Guid.NewGuid().ToString("N");
+            string timestampPart = DateTime.UtcNow.Ticks.ToString();
+            string combinedString = guidPart + timestampPart;
+            
+            // Create a simple hash-like token by taking parts of the combined string
+            string token = System.Convert.ToBase64String(
+                System.Text.Encoding.UTF8.GetBytes(combinedString)
+            ).Replace("+", "-").Replace("/", "_").Replace("=", "").Substring(0, 32);
+            
+            // Log CSRF token generation for security auditing
+            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+            context.Trace($"CSRF token generated for client_id: {clientId}");
+            
+            return token;
+        }" />
+        
+        <!-- Store CSRF token in cache -->
+        <cache-store-value key="@($"CSRF-{context.Variables.GetValueOrDefault<string>("csrf_token")}")" 
+                          value="@($"{context.Variables.GetValueOrDefault<string>("client_id")}:{context.Variables.GetValueOrDefault<string>("normalized_redirect_uri")}:{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}")" 
+                          duration="900" />
           <!-- Check if client exists in cache -->
         <set-variable name="is_client_registered" value="@{
             try {
@@ -114,7 +138,9 @@ __COMMON_STYLES__
                 context.Trace($"Error checking client registration: {ex.Message}");
                 return false;
             }
-        }" />        <!-- Get client name and URI from cache -->
+        }" />
+        
+        <!-- Get client name from cache -->
         <set-variable name="client_name" value="@{
             try {
                 string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
@@ -162,7 +188,9 @@ __COMMON_STYLES__
                 context.Trace($"Error retrieving client URI: {ex.Message}");
                 return "N/A";
             }
-        }" />          <!-- Define common CSS for reuse in both consent and access denied pages -->
+        }" />
+        
+        <!-- Define common CSS for reuse in both consent and access denied pages -->
         <set-variable name="common_styles" value="@{
             return @"        body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -295,7 +323,10 @@ __COMMON_STYLES__
             font-weight: 500;
             color: #D83B01; /* Microsoft Attention color */
         }";
-        }" />          <!-- Consolidate CSS code blocks to reuse common_styles -->        <set-variable name="consent_page_template" value="@{
+        }" />
+        
+        <!-- HTML template for consent page -->
+        <set-variable name="consent_page_template" value="@{
             return @"<!DOCTYPE html>
 <html lang='en'>
 <head>    <meta charset='UTF-8'>
@@ -336,6 +367,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 <input type='hidden' name='client_id' value='__CLIENT_ID__'>
                 <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
                 <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='csrf_token' value='__CSRF_TOKEN__'>
                 <input type='hidden' name='consent_action' value='allow'>
                 <button type='submit' class='btn btn-primary'>Allow</button>
             </form>
@@ -343,6 +375,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
                 <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
                 <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='csrf_token' value='__CSRF_TOKEN__'>
                 <input type='hidden' name='consent_action' value='deny'>
                 <button type='submit' class='btn btn-secondary'>Deny</button>
             </form>
@@ -561,9 +594,341 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             return "";
         }" />
         
+        <!-- Extract and validate CSRF token from form data -->
+        <set-variable name="csrf_token_from_form" value="@{
+            if (context.Request.Method == "POST")
+            {
+                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
+                if (contentType.Contains("application/x-www-form-urlencoded"))
+                {
+                    string body = context.Request.Body.As<string>(preserveContent: true);
+                    string[] pairs = body.Split('&');
+                    foreach (string pair in pairs)
+                    {
+                        string[] keyValue = pair.Split('=');
+                        if (keyValue.Length == 2 && keyValue[0] == "csrf_token")
+                        {
+                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
+                        }
+                    }
+                }
+            }
+            return "";
+        }" />
+        
+        <!-- Validate CSRF token for POST requests -->
+        <set-variable name="csrf_valid" value="@{
+            if (context.Request.Method != "POST") {
+                return true; // No CSRF validation needed for GET requests
+            }
+            
+            string submittedToken = context.Variables.GetValueOrDefault<string>("csrf_token_from_form", "");
+            if (string.IsNullOrEmpty(submittedToken)) {
+                context.Trace("CSRF validation failed: No token submitted");
+                return false;
+            }
+            
+            // Look up the token in cache
+            string cacheKey = $"CSRF-{submittedToken}";
+            // Note: We'll validate this in the next step using cache-lookup-value
+            
+            return true; // Initial validation passes, detailed validation follows
+        }" />
+        
+        <!-- Validate Origin/Referer headers for CSRF defense-in-depth -->
+        <set-variable name="origin_referer_valid" value="@{
+            if (context.Request.Method != "POST") {
+                return true; // Only validate for state-changing operations
+            }
+            
+            // Get the target origin (expected origin)
+            string targetOrigin = "{{APIMGatewayURL}}";
+            
+            // Remove protocol and trailing slash for comparison
+            if (targetOrigin.StartsWith("https://")) {
+                targetOrigin = targetOrigin.Substring(8);
+            } else if (targetOrigin.StartsWith("http://")) {
+                targetOrigin = targetOrigin.Substring(7);
+            }
+            if (targetOrigin.EndsWith("/")) {
+                targetOrigin = targetOrigin.TrimEnd('/');
+            }
+            
+            // First check Origin header (preferred)
+            string originHeader = context.Request.Headers.GetValueOrDefault("Origin", "");
+            if (!string.IsNullOrEmpty(originHeader)) {
+                try {
+                    Uri originUri = new Uri(originHeader);
+                    string sourceOrigin = originUri.Host;
+                    if (originUri.Port != 80 && originUri.Port != 443) {
+                        sourceOrigin += ":" + originUri.Port;
+                    }
+                    
+                    if (sourceOrigin.Equals(targetOrigin, StringComparison.OrdinalIgnoreCase)) {
+                        context.Trace($"Origin header validation passed: {sourceOrigin}");
+                        return true;
+                    } else {
+                        context.Trace($"Origin header validation failed: {sourceOrigin} != {targetOrigin}");
+                        return false;
+                    }
+                } catch (Exception ex) {
+                    context.Trace($"Origin header parsing failed: {ex.Message}");
+                    return false;
+                }
+            }
+            
+            // Fallback to Referer header if Origin is not present
+            string refererHeader = context.Request.Headers.GetValueOrDefault("Referer", "");
+            if (!string.IsNullOrEmpty(refererHeader)) {
+                try {
+                    Uri refererUri = new Uri(refererHeader);
+                    string sourceOrigin = refererUri.Host;
+                    if (refererUri.Port != 80 && refererUri.Port != 443) {
+                        sourceOrigin += ":" + refererUri.Port;
+                    }
+                    
+                    if (sourceOrigin.Equals(targetOrigin, StringComparison.OrdinalIgnoreCase)) {
+                        context.Trace($"Referer header validation passed: {sourceOrigin}");
+                        return true;
+                    } else {
+                        context.Trace($"Referer header validation failed: {sourceOrigin} != {targetOrigin}");
+                        return false;
+                    }
+                } catch (Exception ex) {
+                    context.Trace($"Referer header parsing failed: {ex.Message}");
+                    return false;
+                }
+            }
+            
+            // Neither Origin nor Referer header present - this is suspicious for POST requests
+            // OWASP recommends blocking such requests for better security
+            context.Trace("CSRF validation failed: Neither Origin nor Referer header present in POST request");
+            return false; // Block requests without proper origin validation
+        }" />
+        
+        <!-- Validate Fetch Metadata for additional CSRF protection -->
+        <set-variable name="fetch_metadata_valid" value="@{
+            // Check Sec-Fetch-Site header for cross-site request detection
+            string secFetchSite = context.Request.Headers.GetValueOrDefault("Sec-Fetch-Site", "");
+            
+            // Allow same-origin and same-site requests, and direct user navigation
+            if (string.IsNullOrEmpty(secFetchSite) || 
+                secFetchSite == "same-origin" || 
+                secFetchSite == "same-site" || 
+                secFetchSite == "none") {
+                return true;
+            }
+            
+            // Block cross-site requests for state-changing operations
+            if (context.Request.Method == "POST" && secFetchSite == "cross-site") {
+                context.Trace($"Fetch metadata validation failed: Cross-site POST request detected. Sec-Fetch-Site: {secFetchSite}");
+                return false;
+            }
+            
+            // Log suspicious but allow for compatibility
+            context.Trace($"Fetch metadata warning: Unusual Sec-Fetch-Site value: {secFetchSite}");
+            return true;
+        }" />
+        
+        <!-- Look up CSRF token from cache -->
+        <cache-lookup-value key="@($"CSRF-{context.Variables.GetValueOrDefault<string>("csrf_token_from_form")}")" variable-name="csrf_token_data" />
+        
+        <!-- Detailed CSRF validation -->
+        <set-variable name="csrf_validation_result" value="@{
+            if (context.Request.Method != "POST") {
+                return "valid"; // No CSRF validation needed for GET requests
+            }
+            
+            string submittedToken = context.Variables.GetValueOrDefault<string>("csrf_token_from_form", "");
+            if (string.IsNullOrEmpty(submittedToken)) {
+                return "missing_token";
+            }
+            
+            string tokenData = context.Variables.GetValueOrDefault<string>("csrf_token_data");
+            if (string.IsNullOrEmpty(tokenData)) {
+                context.Trace($"CSRF validation failed: Token not found in cache");
+                return "invalid_token";
+            }
+            
+            try {
+                // Parse token data: client_id:redirect_uri:timestamp
+                string[] parts = tokenData.Split(':');
+                if (parts.Length < 3) {
+                    return "malformed_token";
+                }
+                
+                string tokenClientId = parts[0];
+                string tokenRedirectUri = parts[1];
+                string timestampStr = parts[2];
+                
+                // Validate client_id and redirect_uri match using constant-time comparison
+                string currentClientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                string currentRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                
+                // Constant-time string comparison for client_id to prevent timing attacks
+                bool clientIdMatches = true;
+                if (tokenClientId == null || currentClientId == null) {
+                    clientIdMatches = (tokenClientId == currentClientId);
+                } else if (tokenClientId.Length != currentClientId.Length) {
+                    clientIdMatches = false;
+                } else {
+                    int result = 0;
+                    for (int i = 0; i < tokenClientId.Length; i++) {
+                        result |= tokenClientId[i] ^ currentClientId[i];
+                    }
+                    clientIdMatches = (result == 0);
+                }
+                
+                if (!clientIdMatches) {
+                    context.Trace($"CSRF validation failed: Client ID mismatch");
+                    return "client_mismatch";
+                }
+                
+                // Constant-time string comparison for redirect_uri to prevent timing attacks
+                bool redirectUriMatches = true;
+                if (tokenRedirectUri == null || currentRedirectUri == null) {
+                    redirectUriMatches = (tokenRedirectUri == currentRedirectUri);
+                } else if (tokenRedirectUri.Length != currentRedirectUri.Length) {
+                    redirectUriMatches = false;
+                } else {
+                    int result = 0;
+                    for (int i = 0; i < tokenRedirectUri.Length; i++) {
+                        result |= tokenRedirectUri[i] ^ currentRedirectUri[i];
+                    }
+                    redirectUriMatches = (result == 0);
+                }
+                
+                if (!redirectUriMatches) {
+                    context.Trace($"CSRF validation failed: Redirect URI mismatch");
+                    return "redirect_mismatch";
+                }
+                
+                // Validate timestamp (token should not be older than 15 minutes)
+                DateTime tokenTime;
+                try {
+                    tokenTime = DateTime.Parse(timestampStr);
+                } catch (Exception) {
+                    return "invalid_timestamp";
+                }
+                
+                TimeSpan age = DateTime.UtcNow - tokenTime;
+                if (age.TotalMinutes > 15) {
+                    context.Trace($"CSRF validation failed: Token expired. Age: {age.TotalMinutes} minutes");
+                    return "expired_token";
+                }
+                
+                context.Trace("CSRF validation successful");
+                return "valid";
+                
+            } catch (Exception ex) {
+                context.Trace($"CSRF validation error: {ex.Message}");
+                return "validation_error";
+            }
+        }" />
+        
         <!-- If this is a form submission, process the consent choice -->
         <choose>
             <when condition="@(context.Request.Method == "POST")">
+                <!-- First validate Origin/Referer headers for defense-in-depth -->
+                <choose>
+                    <when condition="@(!context.Variables.GetValueOrDefault<bool>("origin_referer_valid"))">
+                        <!-- Origin/Referer validation failed - potential cross-site attack -->
+                        <return-response>
+                            <set-status code="403" reason="Forbidden" />
+                            <set-header name="Content-Type" exists-action="override">
+                                <value>text/html</value>
+                            </set-header>
+                            <set-header name="Cache-Control" exists-action="override">
+                                <value>no-store, no-cache</value>
+                            </set-header>
+                            <set-header name="Pragma" exists-action="override">
+                                <value>no-cache</value>
+                            </set-header>
+                            <set-body>@{
+                                string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
+                                string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+                                
+                                // Replace placeholders with actual content
+                                errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
+                                errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", "Request origin validation failed. Please try again.");
+                                
+                                return errorTemplate;
+                            }</set-body>
+                        </return-response>
+                    </when>
+                    <otherwise>
+                        <!-- Origin/Referer validation passed, proceed with Fetch Metadata validation -->
+                        <!-- First validate Fetch Metadata for cross-site request detection -->
+                        <choose>
+                            <when condition="@(!context.Variables.GetValueOrDefault<bool>("fetch_metadata_valid"))">
+                                <!-- Fetch metadata validation failed - potential cross-site attack -->
+                                <return-response>
+                                    <set-status code="403" reason="Forbidden" />
+                                    <set-header name="Content-Type" exists-action="override">
+                                        <value>text/html</value>
+                                    </set-header>
+                                    <set-header name="Cache-Control" exists-action="override">
+                                        <value>no-store, no-cache</value>
+                                    </set-header>
+                                    <set-header name="Pragma" exists-action="override">
+                                        <value>no-cache</value>
+                                    </set-header>
+                                    <set-body>@{
+                                        string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
+                                        string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+                                        
+                                        // Replace placeholders with actual content
+                                        errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
+                                        errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", "Request validation failed. Please try again.");
+                                        
+                                        return errorTemplate;
+                                    }</set-body>
+                                </return-response>
+                            </when>
+                            <otherwise>
+                                <!-- Fetch metadata validation passed, proceed with CSRF validation -->
+                                <!-- First validate CSRF token -->
+                                <choose>
+                                    <when condition="@(context.Variables.GetValueOrDefault<string>("csrf_validation_result") != "valid")">
+                                        <!-- CSRF validation failed -->
+                                        <set-variable name="csrf_error_message" value="@{
+                                            string result = context.Variables.GetValueOrDefault<string>("csrf_validation_result", "unknown");
+                                            
+                                            // Log detailed error for server-side debugging but return generic message to client
+                                            context.Trace($"CSRF validation failed with result: {result}");
+                                            
+                                            // Return generic error message to prevent information leakage
+                                            return "Request validation failed. Please refresh the page and try again.";
+                                        }" />
+                                        
+                                        <return-response>
+                                            <set-status code="403" reason="Forbidden" />
+                                            <set-header name="Content-Type" exists-action="override">
+                                                <value>text/html</value>
+                                            </set-header>
+                                            <set-header name="Cache-Control" exists-action="override">
+                                                <value>no-store, no-cache</value>
+                                            </set-header>
+                                            <set-header name="Pragma" exists-action="override">
+                                                <value>no-cache</value>
+                                            </set-header>
+                                            <set-body>@{
+                                                string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
+                                                string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+                                                string errorMessage = context.Variables.GetValueOrDefault<string>("csrf_error_message");
+                                                
+                                                // Replace placeholders with actual content
+                                                errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
+                                                errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", errorMessage);
+                                                
+                                                return errorTemplate;
+                                            }</set-body>
+                                        </return-response>
+                                    </when>
+                                    <otherwise>
+                                        <!-- CSRF validation passed, proceed with consent processing -->
+                                        <!-- Delete the CSRF token from cache to prevent reuse -->
+                                        <cache-remove-value key="@($"CSRF-{context.Variables.GetValueOrDefault<string>("csrf_token_from_form")}")" />
                 <choose>
                     <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
                         <!-- Process consent approval: Calculate everything needed for response in inbound -->
@@ -866,6 +1231,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         </return-response>
                     </when>
                     <otherwise>
+                        <!-- Invalid consent action - return error -->
                         <return-response>
                             <set-status code="403" reason="Forbidden" />
                             <set-header name="Content-Type" exists-action="override">
@@ -877,18 +1243,25 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             </set-header>
                             <set-header name="Pragma" exists-action="override">
                                 <value>no-cache</value>
-                            </set-header>                            <set-body>@{
+                            </set-header>
+                            <set-body>@{
                                 string denialTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
                                 string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
                                 
                                 // Replace placeholders with actual content
                                 denialTemplate = denialTemplate.Replace("__COMMON_STYLES__", commonStyles);
                                 denialTemplate = denialTemplate.Replace("__DENIAL_MESSAGE__", 
-                                    "You have previously denied authorization for this application against the MCP server.");
+                                    "Invalid consent action. Please try again.");
                                 
                                 return denialTemplate;
                             }</set-body>
                         </return-response>
+                    </otherwise>
+                </choose>
+                                    </otherwise>
+                                </choose>
+                            </otherwise>
+                        </choose>
                     </otherwise>
                 </choose>
             </when>
@@ -930,7 +1303,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             </set-header>
                             <set-header name="Pragma" exists-action="override">
                                 <value>no-cache</value>
-                            </set-header>                            <set-body>@{
+                            </set-header>
+                            <set-body>@{
                                 string denialTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
                                 string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
                                 
@@ -998,6 +1372,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     context.Trace($"DEBUG: Original redirect URI for form: {originalRedirectUri}");
                                     
                                     string state = context.Variables.GetValueOrDefault<string>("state", "");
+                                    string csrfToken = context.Variables.GetValueOrDefault<string>("csrf_token", "");
                                     
                                     // Create a temporary placeholder for the form fields
                                     string FORM_FIELD_PLACEHOLDER = "___ENCODED_REDIRECT_URI___";
@@ -1013,6 +1388,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     template = template.Replace("__CLIENT_ID__", clientId);
                                     template = template.Replace("__REDIRECT_URI__", normalizedRedirectUri); // Human-readable for display
                                     template = template.Replace("__STATE__", state);
+                                    template = template.Replace("__CSRF_TOKEN__", csrfToken);
                                     template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");                                    // Handle space-separated OAuth scopes and create individual list items
                                     string[] scopeArray = oauthScopes.Split(new char[] {' '}, StringSplitOptions.RemoveEmptyEntries);
                                     StringBuilder scopeList = new StringBuilder();
@@ -1034,6 +1410,28 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     <set-status code="200" reason="OK" />
                                     <set-header name="Content-Type" exists-action="override">
                                         <value>text/html</value>
+                                    </set-header>
+                                    <!-- Security headers -->
+                                    <set-header name="X-Frame-Options" exists-action="override">
+                                        <value>DENY</value>
+                                    </set-header>
+                                    <set-header name="X-Content-Type-Options" exists-action="override">
+                                        <value>nosniff</value>
+                                    </set-header>
+                                    <set-header name="X-XSS-Protection" exists-action="override">
+                                        <value>1; mode=block</value>
+                                    </set-header>
+                                    <set-header name="Referrer-Policy" exists-action="override">
+                                        <value>strict-origin-when-cross-origin</value>
+                                    </set-header>
+                                    <set-header name="Content-Security-Policy" exists-action="override">
+                                        <value>default-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'</value>
+                                    </set-header>
+                                    <set-header name="Cache-Control" exists-action="override">
+                                        <value>no-store, no-cache, must-revalidate</value>
+                                    </set-header>
+                                    <set-header name="Pragma" exists-action="override">
+                                        <value>no-cache</value>
                                     </set-header>
                                     <set-body>@{
                                         return context.Variables.GetValueOrDefault<string>("consent_page", "");
