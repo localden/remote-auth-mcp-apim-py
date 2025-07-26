@@ -13,9 +13,112 @@
     <inbound>        
         <base />        
         <!-- Extract parameters from request -->
-        <set-variable name="client_id" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
-        <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />       
-        <set-variable name="state" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
+        <set-variable name="client_id" value="@{
+            // For POST requests, extract from form body; for GET requests, extract from query string
+            if (context.Request.Method == "POST") {
+                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
+                if (contentType.Contains("application/x-www-form-urlencoded")) {
+                    string body = context.Request.Body.As<string>(preserveContent: true);
+                    string[] pairs = body.Split('&');
+                    foreach (string pair in pairs) {
+                        // Split only on the first '=' to handle values that contain '='
+                        string[] keyValue = pair.Split(new char[] {'='}, 2);
+                        if (keyValue.Length == 2 && keyValue[0] == "client_id") {
+                            string decoded = System.Net.WebUtility.UrlDecode(keyValue[1]);
+                            return decoded;
+                        }
+                    }
+                }
+                return "";
+            } else {
+                string clientId = (string)context.Request.Url.Query.GetValueOrDefault("client_id", "");
+                return clientId;
+            }
+        }" />
+        <set-variable name="redirect_uri" value="@{
+            // For POST requests, extract from form body; for GET requests, extract from query string
+            if (context.Request.Method == "POST") {
+                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
+                if (contentType.Contains("application/x-www-form-urlencoded")) {
+                    string body = context.Request.Body.As<string>(preserveContent: true);
+                    string[] pairs = body.Split('&');
+                    foreach (string pair in pairs) {
+                        // Split only on the first '=' to handle URLs with query parameters
+                        string[] keyValue = pair.Split(new char[] {'='}, 2);
+                        if (keyValue.Length == 2 && keyValue[0] == "redirect_uri") {
+                            // Don't decode here - let normalization handle it consistently
+                            return keyValue[1];
+                        }
+                    }
+                }
+                return "";
+            } else {
+                // Don't decode here - let normalization handle it consistently 
+                string redirectUri = (string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", "");
+                return redirectUri;
+            }
+        }" />       
+        <set-variable name="state" value="@{
+            // For POST requests, extract from form body; for GET requests, extract from query string
+            if (context.Request.Method == "POST") {
+                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
+                if (contentType.Contains("application/x-www-form-urlencoded")) {
+                    string body = context.Request.Body.As<string>(preserveContent: true);
+                    string[] pairs = body.Split('&');
+                    foreach (string pair in pairs) {
+                        // Split only on the first '=' to handle values that contain '='
+                        string[] keyValue = pair.Split(new char[] {'='}, 2);
+                        if (keyValue.Length == 2 && keyValue[0] == "state") {
+                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
+                        }
+                    }
+                }
+                return "";
+            } else {
+                return (string)context.Request.Url.Query.GetValueOrDefault("state", "");
+            }
+        }" />
+        
+        <!-- Extract PKCE parameters -->
+        <set-variable name="code_challenge" value="@{
+            // For POST requests, extract from form body; for GET requests, extract from query string
+            if (context.Request.Method == "POST") {
+                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
+                if (contentType.Contains("application/x-www-form-urlencoded")) {
+                    string body = context.Request.Body.As<string>(preserveContent: true);
+                    string[] pairs = body.Split('&');
+                    foreach (string pair in pairs) {
+                        string[] keyValue = pair.Split(new char[] {'='}, 2);
+                        if (keyValue.Length == 2 && keyValue[0] == "code_challenge") {
+                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
+                        }
+                    }
+                }
+                return "";
+            } else {
+                return (string)context.Request.Url.Query.GetValueOrDefault("code_challenge", "");
+            }
+        }" />
+        
+        <set-variable name="code_challenge_method" value="@{
+            // For POST requests, extract from form body; for GET requests, extract from query string
+            if (context.Request.Method == "POST") {
+                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
+                if (contentType.Contains("application/x-www-form-urlencoded")) {
+                    string body = context.Request.Body.As<string>(preserveContent: true);
+                    string[] pairs = body.Split('&');
+                    foreach (string pair in pairs) {
+                        string[] keyValue = pair.Split(new char[] {'='}, 2);
+                        if (keyValue.Length == 2 && keyValue[0] == "code_challenge_method") {
+                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
+                        }
+                    }
+                }
+                return "";
+            } else {
+                return (string)context.Request.Url.Query.GetValueOrDefault("code_challenge_method", "");
+            }
+        }" />
       
          <set-variable name="access_denied_template" value="@{
             return @"<!DOCTYPE html>
@@ -25,12 +128,44 @@
     <title>Access Denied</title>
     <style>
 __COMMON_STYLES__
+        .error-details {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            font-family: 'Courier New', Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+        
+        .error-title {
+            color: #dc3545;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .debug-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        .debug-label {
+            font-weight: bold;
+            color: #495057;
+        }
     </style>
 </head>
 <body>
     <div class='consent-container'>
         <h1 class='denial-heading'>Access Denied</h1>
-        <p>__DENIAL_MESSAGE__</p>
+        <div class='error-details'>
+            <div class='error-title'>Error Details:</div>
+            __DENIAL_MESSAGE__
+        </div>
         <p>The application will not be able to access your data.</p>
         <p>You can close this window safely.</p>
     </div>
@@ -63,11 +198,31 @@ __COMMON_STYLES__
 </body>
 </html>";
         }" />
-          <!-- Explicitly normalize the redirect_uri by decoding it once -->
+        <!-- Explicitly normalize the redirect_uri by decoding it properly -->
         <set-variable name="normalized_redirect_uri" value="@{
             string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
-            // Single decode is enough - we want to work with the normal decoded version everywhere
-            return System.Net.WebUtility.UrlDecode(redirectUri);
+            
+            if (string.IsNullOrEmpty(redirectUri)) {
+                return "";
+            }
+            
+            try {
+                // First decode
+                string firstDecode = System.Net.WebUtility.UrlDecode(redirectUri);
+                
+                // Check if it still looks encoded (contains % followed by hex digits)
+                if (firstDecode.Contains("%") && System.Text.RegularExpressions.Regex.IsMatch(firstDecode, @"%[0-9A-Fa-f]{2}")) {
+                    // It's double-encoded, decode again
+                    string secondDecode = System.Net.WebUtility.UrlDecode(firstDecode);
+                    return secondDecode;
+                } else {
+                    // Single encoding, first decode is sufficient
+                    return firstDecode;
+                }
+            } catch (Exception) {
+                // If decoding fails, return the original value
+                return redirectUri;
+            }
         }" />
         
         <!-- Look up client information from cache -->
@@ -76,8 +231,14 @@ __COMMON_STYLES__
         <!-- Look up OAuth scopes from named value -->
         <set-variable name="oauth_scopes" value="{{OAuthScopes}}" />
         
-        <!-- Generate CSRF token for consent forms -->
+        <!-- Generate CSRF token for consent forms (only for GET requests) -->
         <set-variable name="csrf_token" value="@{
+            // Only generate CSRF tokens for GET requests (when showing the consent form)
+            // POST requests should validate existing tokens, not generate new ones
+            if (context.Request.Method != "GET") {
+                return ""; // Don't generate tokens for POST requests
+            }
+            
             // Generate a random CSRF token using Guid and timestamp
             string guidPart = Guid.NewGuid().ToString("N");
             string timestampPart = DateTime.UtcNow.Ticks.ToString();
@@ -88,17 +249,31 @@ __COMMON_STYLES__
                 System.Text.Encoding.UTF8.GetBytes(combinedString)
             ).Replace("+", "-").Replace("/", "_").Replace("=", "").Substring(0, 32);
             
-            // Log CSRF token generation for security auditing
-            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-            context.Trace($"CSRF token generated for client_id: {clientId}");
-            
             return token;
         }" />
         
-        <!-- Store CSRF token in cache -->
-        <cache-store-value key="@($"CSRF-{context.Variables.GetValueOrDefault<string>("csrf_token")}")" 
-                          value="@($"{context.Variables.GetValueOrDefault<string>("client_id")}:{context.Variables.GetValueOrDefault<string>("normalized_redirect_uri")}:{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}")" 
-                          duration="900" />
+        <!-- Store CSRF token in cache (only for GET requests) -->
+        <choose>
+            <when condition="@(context.Request.Method == "GET" && !string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("csrf_token")))">
+                <cache-store-value key="@($"CSRF-{context.Variables.GetValueOrDefault<string>("csrf_token")}")" 
+                                  value="@{
+                                      string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                                      string normalizedRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                                      string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                                      string tokenData = $"{clientId}:{normalizedRedirectUri}:{timestamp}";
+                                      
+                                      // Add debugging info to help diagnose cache issues
+                                      string debugInfo = $"CACHED_AT:{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}";
+                                      return $"{tokenData}|{debugInfo}";
+                                  }" 
+                                  duration="900" />
+                <!-- Set a variable to track that we cached a token for debugging -->
+                <set-variable name="csrf_token_cached" value="true" />
+            </when>
+            <otherwise>
+                <set-variable name="csrf_token_cached" value="false" />
+            </otherwise>
+        </choose>
           <!-- Check if client exists in cache -->
         <set-variable name="is_client_registered" value="@{
             try {
@@ -112,7 +287,6 @@ __COMMON_STYLES__
                 // Get the client info from the variable set by cache-lookup-value
                 string clientInfoJson = context.Variables.GetValueOrDefault<string>("clientInfoJson");
                   if (string.IsNullOrEmpty(clientInfoJson)) {
-                    context.Trace($"Client info not found in cache for client_id: {clientId}");
                     return false;
                 }
                 
@@ -131,11 +305,9 @@ __COMMON_STYLES__
                     }
                 }
                 
-                context.Trace($"Redirect URI mismatch - URI: {redirectUri} not found in registered URIs");
                 return false;
             }
             catch (Exception ex) {
-                context.Trace($"Error checking client registration: {ex.Message}");
                 return false;
             }
         }" />
@@ -163,7 +335,6 @@ __COMMON_STYLES__
                 return string.IsNullOrEmpty(clientName) ? clientId : clientName;
             }
             catch (Exception ex) {
-                context.Trace($"Error retrieving client name: {ex.Message}");
                 return context.Variables.GetValueOrDefault<string>("client_id", "Unknown Application");
             }
         }" />
@@ -185,7 +356,6 @@ __COMMON_STYLES__
                 return string.IsNullOrEmpty(clientUri) ? "N/A" : clientUri;
             }
             catch (Exception ex) {
-                context.Trace($"Error retrieving client URI: {ex.Message}");
                 return "N/A";
             }
         }" />
@@ -367,6 +537,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 <input type='hidden' name='client_id' value='__CLIENT_ID__'>
                 <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
                 <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='code_challenge' value='__CODE_CHALLENGE__'>
+                <input type='hidden' name='code_challenge_method' value='__CODE_CHALLENGE_METHOD__'>
                 <input type='hidden' name='csrf_token' value='__CSRF_TOKEN__'>
                 <input type='hidden' name='consent_action' value='allow'>
                 <button type='submit' class='btn btn-primary'>Allow</button>
@@ -375,6 +547,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
                 <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
                 <input type='hidden' name='state' value='__STATE__'>
+                <input type='hidden' name='code_challenge' value='__CODE_CHALLENGE__'>
+                <input type='hidden' name='code_challenge_method' value='__CODE_CHALLENGE_METHOD__'>
                 <input type='hidden' name='csrf_token' value='__CSRF_TOKEN__'>
                 <input type='hidden' name='consent_action' value='deny'>
                 <button type='submit' class='btn btn-secondary'>Deny</button>
@@ -400,8 +574,6 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 // Define a consistent cookie name for denials
                 string DENIAL_COOKIE_NAME = "MCP_DENIED_CLIENTS";
                 
-                context.Trace($"DEBUG: Starting denial cookie check for clientId: {clientId}, redirectUri: {redirectUri}");
-                
                 // Check for cookie in request
                 var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
                 if (string.IsNullOrEmpty(cookieHeader)) {
@@ -425,17 +597,11 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             // Use the normalized (decoded) redirect URI for consistency
                             string clientKey = $"{clientId}:{redirectUri}";
                             
-                            // Check if this client/redirect is in the denied list
-                            context.Trace($"DEBUG: Checking cookie. Current clientKey: {clientKey}");
-                            context.Trace($"DEBUG: Decoded cookie content: {decodedValue}");
-                            
                             foreach (var item in deniedClients) {
                                 string itemString = item.ToString();
-                                context.Trace($"DEBUG: Comparing against denied entry: {itemString}");
                                 
                                 // Direct comparison - no need for encoded version since we're using normalized URI
                                 if (itemString == clientKey) {
-                                    context.Trace($"DEBUG: Direct match found! Setting has_denial_cookie to true");
                                     return true;
                                 }
                                 
@@ -449,30 +615,24 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                             // Always decode the stored redirect URI once for comparison
                                             string storedRedirectUri = System.Net.WebUtility.UrlDecode(parts[1]);
                                             
-                                            context.Trace($"DEBUG: Split values - storedClientId: {storedClientId}, decoded redirectUri: {storedRedirectUri}");
-                                            context.Trace($"DEBUG: Comparing against - clientId: {clientId}, normalized redirectUri: {redirectUri}");
-                                            
                                             // Simple direct comparison since both are now in decoded form
                                             if (storedClientId == clientId && storedRedirectUri == redirectUri) {
-                                                context.Trace($"DEBUG: Match found! Setting has_denial_cookie to true");
                                                 return true;
                                             }
                                         }
                                     }
                                 } catch (Exception ex) {
-                                    context.Trace($"Error comparing encoded values: {ex.Message}");
+                                    // Ignore individual comparison errors and continue
                                 }
                             }
                         } catch (Exception ex) {
-                            // Log error but continue if cookie parsing fails
-                            context.Trace($"Error parsing denial cookie: {ex.Message}");
+                            // Ignore cookie parsing errors and continue
                         }
                     }
                 }
                 
                 return false;
             } catch (Exception ex) {
-                context.Trace($"Error checking denial cookie: {ex.Message}");
                 return false;
             }
         }" />
@@ -515,17 +675,11 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             // Always use the normalized redirect URI for consistency
                             string clientKey = $"{clientId}:{redirectUri}";
                             
-                            // Check if this client/redirect is in the approved list
-                            context.Trace($"DEBUG: Checking approval cookie. Current clientKey: {clientKey}");
-                            context.Trace($"DEBUG: Decoded approval cookie content: {decodedValue}");
-                            
                             foreach (var item in approvedClients) {
                                 string itemString = item.ToString();
-                                context.Trace($"DEBUG: Comparing against approved entry: {itemString}");
                                 
                                 // Direct comparison - no need for encoded version since we're using normalized URI
                                 if (itemString == clientKey) {
-                                    context.Trace($"DEBUG: Direct match found! Setting has_approval_cookie to true");
                                     return true;
                                 }
                                 
@@ -539,30 +693,24 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                             // Always decode the stored redirect URI once for comparison
                                             string storedRedirectUri = System.Net.WebUtility.UrlDecode(parts[1]);
                                             
-                                            context.Trace($"DEBUG: Split approval values - storedClientId: {storedClientId}, decoded redirectUri: {storedRedirectUri}");
-                                            context.Trace($"DEBUG: Comparing against - clientId: {clientId}, normalized redirectUri: {redirectUri}");
-                                            
                                             // Simple direct comparison since both are now in decoded form
                                             if (storedClientId == clientId && storedRedirectUri == redirectUri) {
-                                                context.Trace($"DEBUG: Approval match found! Setting has_approval_cookie to true");
                                                 return true;
                                             }
                                         }
                                     }
                                 } catch (Exception ex) {
-                                    context.Trace($"Error comparing encoded values in approval: {ex.Message}");
+                                    // Ignore individual comparison errors and continue
                                 }
                             }
                         } catch (Exception ex) {
-                            // Log error but continue if cookie parsing fails
-                            context.Trace($"Error parsing approval cookie: {ex.Message}");
+                            // Ignore cookie parsing errors and continue
                         }
                     }
                 }
                 
                 return false;
             } catch (Exception ex) {
-                context.Trace($"Error checking approval cookie: {ex.Message}");
                 return false;
             }
         }" />
@@ -581,7 +729,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                     string[] pairs = body.Split('&');
                     foreach (string pair in pairs)
                     {
-                        string[] keyValue = pair.Split('=');
+                        // Split only on the first '=' to handle values that contain '='
+                        string[] keyValue = pair.Split(new char[] {'='}, 2);
                         if (keyValue.Length == 2 && keyValue[0] == "consent_action")
                         {
                             return System.Net.WebUtility.UrlDecode(keyValue[1]);
@@ -605,7 +754,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                     string[] pairs = body.Split('&');
                     foreach (string pair in pairs)
                     {
-                        string[] keyValue = pair.Split('=');
+                        // Split only on the first '=' to handle values that contain '='
+                        string[] keyValue = pair.Split(new char[] {'='}, 2);
                         if (keyValue.Length == 2 && keyValue[0] == "csrf_token")
                         {
                             return System.Net.WebUtility.UrlDecode(keyValue[1]);
@@ -624,7 +774,6 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             
             string submittedToken = context.Variables.GetValueOrDefault<string>("csrf_token_from_form", "");
             if (string.IsNullOrEmpty(submittedToken)) {
-                context.Trace("CSRF validation failed: No token submitted");
                 return false;
             }
             
@@ -665,14 +814,11 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                     }
                     
                     if (sourceOrigin.Equals(targetOrigin, StringComparison.OrdinalIgnoreCase)) {
-                        context.Trace($"Origin header validation passed: {sourceOrigin}");
                         return true;
                     } else {
-                        context.Trace($"Origin header validation failed: {sourceOrigin} != {targetOrigin}");
                         return false;
                     }
                 } catch (Exception ex) {
-                    context.Trace($"Origin header parsing failed: {ex.Message}");
                     return false;
                 }
             }
@@ -688,21 +834,17 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                     }
                     
                     if (sourceOrigin.Equals(targetOrigin, StringComparison.OrdinalIgnoreCase)) {
-                        context.Trace($"Referer header validation passed: {sourceOrigin}");
                         return true;
                     } else {
-                        context.Trace($"Referer header validation failed: {sourceOrigin} != {targetOrigin}");
                         return false;
                     }
                 } catch (Exception ex) {
-                    context.Trace($"Referer header parsing failed: {ex.Message}");
                     return false;
                 }
             }
             
             // Neither Origin nor Referer header present - this is suspicious for POST requests
             // OWASP recommends blocking such requests for better security
-            context.Trace("CSRF validation failed: Neither Origin nor Referer header present in POST request");
             return false; // Block requests without proper origin validation
         }" />
         
@@ -721,12 +863,10 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             
             // Block cross-site requests for state-changing operations
             if (context.Request.Method == "POST" && secFetchSite == "cross-site") {
-                context.Trace($"Fetch metadata validation failed: Cross-site POST request detected. Sec-Fetch-Site: {secFetchSite}");
                 return false;
             }
             
-            // Log suspicious but allow for compatibility
-            context.Trace($"Fetch metadata warning: Unusual Sec-Fetch-Site value: {secFetchSite}");
+            // Allow other values for compatibility
             return true;
         }" />
         
@@ -746,20 +886,43 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             
             string tokenData = context.Variables.GetValueOrDefault<string>("csrf_token_data");
             if (string.IsNullOrEmpty(tokenData)) {
-                context.Trace($"CSRF validation failed: Token not found in cache");
                 return "invalid_token";
             }
             
             try {
+                // Extract the actual token data (before the debug info separator)
+                string actualTokenData = tokenData;
+                if (tokenData.Contains("|")) {
+                    actualTokenData = tokenData.Split('|')[0];
+                }
+                
                 // Parse token data: client_id:redirect_uri:timestamp
-                string[] parts = tokenData.Split(':');
-                if (parts.Length < 3) {
+                // Since both redirect_uri and timestamp can contain colons, we need to be very careful
+                // The timestamp format is: YYYY-MM-DDTHH:mm:ssZ
+                // So we look for the last occurrence of a timestamp pattern
+                
+                // Find the last occurrence of a timestamp pattern (YYYY-MM-DDTHH:mm:ssZ)
+                var timestampPattern = @":\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$";
+                var timestampMatch = System.Text.RegularExpressions.Regex.Match(actualTokenData, timestampPattern);
+                
+                if (!timestampMatch.Success) {
                     return "malformed_token";
                 }
                 
-                string tokenClientId = parts[0];
-                string tokenRedirectUri = parts[1];
-                string timestampStr = parts[2];
+                // Extract the timestamp (without the leading colon)
+                string timestampStr = timestampMatch.Value.Substring(1);
+                
+                // Extract everything before the timestamp match as the client_id:redirect_uri part
+                string clientAndRedirect = actualTokenData.Substring(0, timestampMatch.Index);
+                
+                // Split client_id:redirect_uri on the first colon only
+                int firstColonIndex = clientAndRedirect.IndexOf(':');
+                if (firstColonIndex == -1) {
+                    return "malformed_token";
+                }
+                
+                string tokenClientId = clientAndRedirect.Substring(0, firstColonIndex);
+                string tokenRedirectUri = clientAndRedirect.Substring(firstColonIndex + 1);
                 
                 // Validate client_id and redirect_uri match using constant-time comparison
                 string currentClientId = context.Variables.GetValueOrDefault<string>("client_id", "");
@@ -780,7 +943,6 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 }
                 
                 if (!clientIdMatches) {
-                    context.Trace($"CSRF validation failed: Client ID mismatch");
                     return "client_mismatch";
                 }
                 
@@ -799,7 +961,6 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 }
                 
                 if (!redirectUriMatches) {
-                    context.Trace($"CSRF validation failed: Redirect URI mismatch");
                     return "redirect_mismatch";
                 }
                 
@@ -813,15 +974,12 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 
                 TimeSpan age = DateTime.UtcNow - tokenTime;
                 if (age.TotalMinutes > 15) {
-                    context.Trace($"CSRF validation failed: Token expired. Age: {age.TotalMinutes} minutes");
                     return "expired_token";
                 }
                 
-                context.Trace("CSRF validation successful");
                 return "valid";
                 
             } catch (Exception ex) {
-                context.Trace($"CSRF validation error: {ex.Message}");
                 return "validation_error";
             }
         }" />
@@ -848,9 +1006,30 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                 string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
                                 string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
                                 
+                                // Get detailed origin information for debugging
+                                string originHeader = context.Request.Headers.GetValueOrDefault("Origin", "");
+                                string refererHeader = context.Request.Headers.GetValueOrDefault("Referer", "");
+                                string targetOrigin = "{{APIMGatewayURL}}";
+                                
+                                string detailedMessage = "Request origin validation failed.\\n\\n";
+                                detailedMessage += "Debugging Info:\\n";
+                                detailedMessage += $"• Request Method: {context.Request.Method}\\n";
+                                detailedMessage += $"• Origin Header: {(string.IsNullOrEmpty(originHeader) ? "Not present" : originHeader)}\\n";
+                                detailedMessage += $"• Referer Header: {(string.IsNullOrEmpty(refererHeader) ? "Not present" : refererHeader)}\\n";
+                                detailedMessage += $"• Expected Origin: {targetOrigin}\\n";
+                                
+                                if (!string.IsNullOrEmpty(originHeader)) {
+                                    detailedMessage += $"\\nIssue: Origin header '{originHeader}' does not match expected origin '{targetOrigin}'.\\n";
+                                } else if (!string.IsNullOrEmpty(refererHeader)) {
+                                    detailedMessage += $"\\nIssue: Referer header '{refererHeader}' does not match expected origin '{targetOrigin}'.\\n";
+                                } else {
+                                    detailedMessage += $"\\nIssue: Neither Origin nor Referer headers are present in the request.\\n";
+                                }
+                                detailedMessage += "\\nThis may indicate a cross-site request forgery attempt.";
+                                
                                 // Replace placeholders with actual content
                                 errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
-                                errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", "Request origin validation failed. Please try again.");
+                                errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", detailedMessage);
                                 
                                 return errorTemplate;
                             }</set-body>
@@ -877,9 +1056,22 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                         string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
                                         string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
                                         
+                                        // Get detailed fetch metadata information
+                                        string secFetchSite = context.Request.Headers.GetValueOrDefault("Sec-Fetch-Site", "");
+                                        string secFetchMode = context.Request.Headers.GetValueOrDefault("Sec-Fetch-Mode", "");
+                                        string secFetchDest = context.Request.Headers.GetValueOrDefault("Sec-Fetch-Dest", "");
+                                        
+                                        string detailedMessage = "Fetch metadata validation failed.\\n\\n";
+                                        detailedMessage += "Debugging Info:\\n";
+                                        detailedMessage += $"• Request Method: {context.Request.Method}\\n";
+                                        detailedMessage += $"• Sec-Fetch-Site: {(string.IsNullOrEmpty(secFetchSite) ? "Not present" : secFetchSite)}\\n";
+                                        detailedMessage += $"• Sec-Fetch-Mode: {(string.IsNullOrEmpty(secFetchMode) ? "Not present" : secFetchMode)}\\n";
+                                        detailedMessage += $"• Sec-Fetch-Dest: {(string.IsNullOrEmpty(secFetchDest) ? "Not present" : secFetchDest)}\\n";
+                                        detailedMessage += $"\\nIssue: Sec-Fetch-Site header value '{secFetchSite}' indicates a cross-site request, which is not allowed for security reasons.";
+                                        
                                         // Replace placeholders with actual content
                                         errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
-                                        errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", "Request validation failed. Please try again.");
+                                        errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", detailedMessage);
                                         
                                         return errorTemplate;
                                     }</set-body>
@@ -894,11 +1086,174 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                         <set-variable name="csrf_error_message" value="@{
                                             string result = context.Variables.GetValueOrDefault<string>("csrf_validation_result", "unknown");
                                             
-                                            // Log detailed error for server-side debugging but return generic message to client
-                                            context.Trace($"CSRF validation failed with result: {result}");
-                                            
-                                            // Return generic error message to prevent information leakage
-                                            return "Request validation failed. Please refresh the page and try again.";
+                                            // Return specific error message based on the failure reason with detailed debugging info
+                                            switch (result) {
+                                                case "missing_token":
+                                                    return "CSRF token validation failed: No security token was provided with the request.\\n\\n" +
+                                                           "Debugging Info:\\n" +
+                                                           $"• Request Method: {context.Request.Method}\\n" +
+                                                           $"• Content-Type: {context.Request.Headers.GetValueOrDefault("Content-Type", "N/A")}\\n" +
+                                                           "• Expected: A valid CSRF token in the form data\\n\\n" +
+                                                           "Please refresh the page and try again.";
+                                                           
+                                                case "invalid_token":
+                                                    string submittedToken = context.Variables.GetValueOrDefault<string>("csrf_token_from_form", "");
+                                                    string cacheKey = $"CSRF-{submittedToken}";
+                                                    return "CSRF token validation failed: The security token provided is invalid or has expired.\\n\\n" +
+                                                           "Debugging Info:\\n" +
+                                                           $"• Request Method: {context.Request.Method}\\n" +
+                                                           $"• Submitted Token: {submittedToken}\\n" +
+                                                           $"• Cache Key Lookup: {cacheKey}\\n" +
+                                                           $"• Token found in cache: No\\n" +
+                                                           $"• Cache Duration: 900 seconds (15 minutes)\\n" +
+                                                           $"• Possible causes:\\n" +
+                                                           "  - Token has expired (15 min limit)\\n" +
+                                                           "  - Token was already used and removed from cache\\n" +
+                                                           "  - Cache was cleared or restarted\\n" +
+                                                           "  - Token was generated on different server instance\\n" +
+                                                           "  - Form was submitted without proper GET request first\\n\\n" +
+                                                           "Please refresh the page and try again.";
+                                                           
+                                                case "malformed_token":
+                                                    string tokenData = context.Variables.GetValueOrDefault<string>("csrf_token_data", "");
+                                                    return "CSRF token validation failed: The security token format is invalid.\\n\\n" +
+                                                           "Debugging Info:\\n" +
+                                                           $"• Token Data from Cache: {tokenData}\\n" +
+                                                           $"• Expected Format: client_id:redirect_uri:YYYY-MM-DDTHH:mm:ssZ\\n" +
+                                                           $"• Issue: Could not parse timestamp or client data\\n\\n" +
+                                                           "Please refresh the page and try again.";
+                                                           
+                                                case "client_mismatch":
+                                                    string tokenData2 = context.Variables.GetValueOrDefault<string>("csrf_token_data", "");
+                                                    string currentClientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                                                    
+                                                    string detailedMsg = "CSRF token validation failed: The security token was issued for a different client application.\\n\\n";
+                                                    detailedMsg += "Debugging Info:\\n";
+                                                    detailedMsg += $"• Current Client ID: {currentClientId}\\n";
+                                                    
+                                                    if (!string.IsNullOrEmpty(tokenData2)) {
+                                                        try {
+                                                            var timestampPattern = @":\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$";
+                                                            var timestampMatch = System.Text.RegularExpressions.Regex.Match(tokenData2, timestampPattern);
+                                                            if (timestampMatch.Success) {
+                                                                string clientAndRedirect = tokenData2.Substring(0, timestampMatch.Index);
+                                                                int firstColonIndex = clientAndRedirect.IndexOf(':');
+                                                                if (firstColonIndex != -1) {
+                                                                    string tokenClientId = clientAndRedirect.Substring(0, firstColonIndex);
+                                                                    detailedMsg += $"• Token Client ID: {tokenClientId}\\n";
+                                                                }
+                                                            }
+                                                        } catch (Exception ex) {
+                                                            detailedMsg += $"• Error parsing token: {ex.Message}\\n";
+                                                        }
+                                                    }
+                                                    
+                                                    detailedMsg += "\\nPlease refresh the page and try again.";
+                                                    return detailedMsg;
+                                                    
+                                                case "redirect_mismatch":
+                                                    // For redirect mismatch, include detailed comparison information
+                                                    string tokenData3 = context.Variables.GetValueOrDefault<string>("csrf_token_data", "");
+                                                    string currentRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                                                    string rawRedirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                                                    
+                                                    string detailedMessage = "CSRF token validation failed: The security token was issued for a different redirect URI.\\n\\n";
+                                                    detailedMessage += "Debugging Info:\\n";
+                                                    detailedMessage += $"• Current Raw Redirect URI: {rawRedirectUri}\\n";
+                                                    detailedMessage += $"• Current Normalized Redirect URI: {currentRedirectUri}\\n";
+                                                    
+                                                    if (!string.IsNullOrEmpty(tokenData3)) {
+                                                        try {
+                                                            // Parse token data carefully since both redirect_uri and timestamp contain colons
+                                                            var timestampPattern = @":\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$";
+                                                            var timestampMatch = System.Text.RegularExpressions.Regex.Match(tokenData3, timestampPattern);
+                                                            
+                                                            if (timestampMatch.Success) {
+                                                                // Extract everything before the timestamp as client_id:redirect_uri
+                                                                string clientAndRedirect = tokenData3.Substring(0, timestampMatch.Index);
+                                                                
+                                                                // Split on first colon to separate client_id and redirect_uri
+                                                                int firstColonIndex = clientAndRedirect.IndexOf(':');
+                                                                if (firstColonIndex != -1) {
+                                                                    string tokenRedirectUri = clientAndRedirect.Substring(firstColonIndex + 1);
+                                                                    detailedMessage += $"• Token Redirect URI: {tokenRedirectUri}\\n";
+                                                                    detailedMessage += $"• Token URI Length: {tokenRedirectUri.Length}\\n";
+                                                                    detailedMessage += $"• Current URI Length: {currentRedirectUri?.Length ?? 0}\\n";
+                                                                    
+                                                                    // Show character-by-character comparison for first few differences
+                                                                    if (tokenRedirectUri != null && currentRedirectUri != null) {
+                                                                        detailedMessage += "\\nCharacter-by-Character Analysis (first 10 differences):\\n";
+                                                                        int maxLen = Math.Max(tokenRedirectUri.Length, currentRedirectUri.Length);
+                                                                        int diffCount = 0;
+                                                                        for (int i = 0; i < maxLen && diffCount < 10; i++) {
+                                                                            char tokenChar = i < tokenRedirectUri.Length ? tokenRedirectUri[i] : '?';
+                                                                            char currentChar = i < currentRedirectUri.Length ? currentRedirectUri[i] : '?';
+                                                                            if (tokenChar != currentChar) {
+                                                                                detailedMessage += $"• Position {i}: token='{tokenChar}' (ASCII {(int)tokenChar}) vs current='{currentChar}' (ASCII {(int)currentChar})\\n";
+                                                                                diffCount++;
+                                                                            }
+                                                                        }
+                                                                        if (diffCount == 0) {
+                                                                            detailedMessage += "• URLs appear identical character-by-character but length differs\\n";
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        } catch (Exception ex) {
+                                                            detailedMessage += $"• Error parsing token data: {ex.Message}\\n";
+                                                        }
+                                                    }
+                                                    
+                                                    detailedMessage += "\\nPlease refresh the page and try again.";
+                                                    return detailedMessage;
+                                                    
+                                                case "expired_token":
+                                                    string tokenData4 = context.Variables.GetValueOrDefault<string>("csrf_token_data", "");
+                                                    string ageInfo = "";
+                                                    
+                                                    if (!string.IsNullOrEmpty(tokenData4)) {
+                                                        try {
+                                                            var timestampPattern = @":\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$";
+                                                            var timestampMatch = System.Text.RegularExpressions.Regex.Match(tokenData4, timestampPattern);
+                                                            if (timestampMatch.Success) {
+                                                                string timestampStr = timestampMatch.Value.Substring(1);
+                                                                DateTime tokenTime = DateTime.Parse(timestampStr);
+                                                                TimeSpan age = DateTime.UtcNow - tokenTime;
+                                                                ageInfo = $"\\n• Token Age: {age.TotalMinutes:F1} minutes (limit: 15 minutes)";
+                                                            }
+                                                        } catch (Exception) {
+                                                            ageInfo = "\\n• Could not calculate token age";
+                                                        }
+                                                    }
+                                                    
+                                                    return "CSRF token validation failed: The security token has expired.\\n\\n" +
+                                                           "Debugging Info:\\n" +
+                                                           $"• Token limit: 15 minutes{ageInfo}\\n\\n" +
+                                                           "Please refresh the page and try again.";
+                                                           
+                                                case "invalid_timestamp":
+                                                    return "CSRF token validation failed: The security token timestamp is invalid.\\n\\n" +
+                                                           "Debugging Info:\\n" +
+                                                           $"• Token Data: {context.Variables.GetValueOrDefault<string>("csrf_token_data", "")}\\n" +
+                                                           $"• Expected timestamp format: YYYY-MM-DDTHH:mm:ssZ\\n\\n" +
+                                                           "Please refresh the page and try again.";
+                                                           
+                                                case "validation_error":
+                                                    return "CSRF token validation failed: An error occurred while validating the security token.\\n\\n" +
+                                                           "Debugging Info:\\n" +
+                                                           $"• Request Method: {context.Request.Method}\\n" +
+                                                           $"• Submitted Token: {context.Variables.GetValueOrDefault<string>("csrf_token_from_form", "")}\\n" +
+                                                           $"• Token Data: {context.Variables.GetValueOrDefault<string>("csrf_token_data", "")}\\n\\n" +
+                                                           "Please refresh the page and try again.";
+                                                           
+                                                default:
+                                                    return $"CSRF token validation failed: Unknown error ({result}).\\n\\n" +
+                                                           "Debugging Info:\\n" +
+                                                           $"• Validation Result: {result}\\n" +
+                                                           $"• Request Method: {context.Request.Method}\\n" +
+                                                           $"• Submitted Token: {context.Variables.GetValueOrDefault<string>("csrf_token_from_form", "")}\\n\\n" +
+                                                           "Please refresh the page and try again.";
+                                            }
                                         }" />
                                         
                                         <return-response>
@@ -929,8 +1284,9 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                         <!-- CSRF validation passed, proceed with consent processing -->
                                         <!-- Delete the CSRF token from cache to prevent reuse -->
                                         <cache-remove-value key="@($"CSRF-{context.Variables.GetValueOrDefault<string>("csrf_token_from_form")}")" />
-                <choose>
-                    <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
+                                        
+                                        <choose>
+                                            <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
                         <!-- Process consent approval: Calculate everything needed for response in inbound -->
                         <set-variable name="response_status_code" value="302" />
                         <set-variable name="response_redirect_location" value="@{
@@ -945,7 +1301,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             string[] pairs = body.Split('&');
                             foreach (string pair in pairs)
                             {
-                                string[] keyValue = pair.Split('=');
+                                // Split only on the first '=' to handle values that contain '='
+                                string[] keyValue = pair.Split(new char[] {'='}, 2);
                                 if (keyValue.Length == 2)
                                 {
                                     if (keyValue[0] == "client_id")
@@ -971,7 +1328,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             
                             if (string.IsNullOrEmpty(redirectUri))
                             {
-                                redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                                // Use the normalized (decoded) redirect URI for consistency
+                                redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                             }
                             
                             if (string.IsNullOrEmpty(state))
@@ -979,14 +1337,26 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                 state = context.Variables.GetValueOrDefault<string>("state", "");
                             }
                             
-                            context.Trace($"DEBUG: Building redirect location with clientId: {clientId}, redirectUri: {redirectUri}, state: {state}");
-                            
                             // URL encode parameters to prevent injection attacks
                             string encodedClientId = System.Net.WebUtility.UrlEncode(clientId);
                             string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
                             string encodedState = System.Net.WebUtility.UrlEncode(state);
                             
-                            return $"{baseUrl}/authorize?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}&consent=granted";
+                            // Add PKCE parameters if they exist
+                            string codeChallenge = context.Variables.GetValueOrDefault<string>("code_challenge", "");
+                            string codeChallengeMethod = context.Variables.GetValueOrDefault<string>("code_challenge_method", "");
+                            
+                            string url = $"{baseUrl}/authorize?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}";
+                            
+                            if (!string.IsNullOrEmpty(codeChallenge)) {
+                                url += $"&code_challenge={System.Net.WebUtility.UrlEncode(codeChallenge)}";
+                            }
+                            
+                            if (!string.IsNullOrEmpty(codeChallengeMethod)) {
+                                url += $"&code_challenge_method={System.Net.WebUtility.UrlEncode(codeChallengeMethod)}";
+                            }
+                            
+                            return url;
                         }" />
                           <!-- Calculate the cookie value right here in inbound before returning response -->
                         <set-variable name="approval_cookie" value="@{
@@ -1001,7 +1371,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             string[] pairs = body.Split('&');
                             foreach (string pair in pairs)
                             {
-                                string[] keyValue = pair.Split('=');
+                                // Split only on the first '=' to handle values that contain '='
+                                string[] keyValue = pair.Split(new char[] {'='}, 2);
                                 if (keyValue.Length == 2)
                                 {
                                     if (keyValue[0] == "client_id")
@@ -1027,9 +1398,6 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                 // Use the normalized version when falling back
                                 redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                             }
-                            
-                            // Log for diagnosis
-                            context.Trace($"Setting approval cookie for client_id: {clientId}, redirect_uri: {redirectUri}");
                             
                             // Create a unique identifier for this client/redirect combination
                             string clientKey = $"{clientId}:{redirectUri}";
@@ -1119,7 +1487,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             string[] pairs = body.Split('&');
                             foreach (string pair in pairs)
                             {
-                                string[] keyValue = pair.Split('=');
+                                // Split only on the first '=' to handle values that contain '='
+                                string[] keyValue = pair.Split(new char[] {'='}, 2);
                                 if (keyValue.Length == 2)
                                 {
                                     if (keyValue[0] == "client_id")
@@ -1145,9 +1514,6 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                 // Use the normalized version when falling back
                                 redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                             }
-                            
-                            // Log for diagnosis
-                            context.Trace($"Setting denial cookie for client_id: {clientId}, redirect_uri: {redirectUri}");
                             
                             // Create a unique identifier for this client/redirect combination
                             string clientKey = $"{clientId}:{redirectUri}";
@@ -1252,17 +1618,19 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             <set-body>@{
                                 string denialTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
                                 string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+                                string consentAction = context.Variables.GetValueOrDefault<string>("consent_action", "");
+                                
+                                string detailedMessage = $"Invalid consent action '{consentAction}' received. Expected 'allow' or 'deny'. This may indicate a form tampering attempt or a browser compatibility issue.";
                                 
                                 // Replace placeholders with actual content
                                 denialTemplate = denialTemplate.Replace("__COMMON_STYLES__", commonStyles);
-                                denialTemplate = denialTemplate.Replace("__DENIAL_MESSAGE__", 
-                                    "Invalid consent action. Please try again.");
+                                denialTemplate = denialTemplate.Replace("__DENIAL_MESSAGE__", detailedMessage);
                                 
                                 return denialTemplate;
                             }</set-body>
                         </return-response>
-                    </otherwise>
-                </choose>
+                                            </otherwise>
+                                        </choose>
                                     </otherwise>
                                 </choose>
                             </otherwise>
@@ -1275,12 +1643,11 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 <choose>
                     <!-- If there's an approval cookie, skip consent and redirect to authorization endpoint -->
                     <when condition="@(context.Variables.GetValueOrDefault<bool>("has_approval_cookie"))">
-                        <!-- Set redirect location to authorization endpoint with consent=granted parameter -->
+                        <!-- Set redirect location to authorization endpoint -->
                         <set-variable name="response_redirect_location" value="@{
                             string baseUrl = "{{APIMGatewayURL}}";
                             string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                            // Use original redirect_uri as it's already properly encoded for URL
-                            string redirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
+                            string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                             string state = context.Variables.GetValueOrDefault<string>("state", "");
                             
                             // URL encode parameters to prevent injection attacks
@@ -1288,7 +1655,21 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
                             string encodedState = System.Net.WebUtility.UrlEncode(state);
                             
-                            return $"{baseUrl}/authorize?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}&consent=granted";
+                            // Add PKCE parameters if they exist
+                            string codeChallenge = context.Variables.GetValueOrDefault<string>("code_challenge", "");
+                            string codeChallengeMethod = context.Variables.GetValueOrDefault<string>("code_challenge_method", "");
+                            
+                            string url = $"{baseUrl}/authorize?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}";
+                            
+                            if (!string.IsNullOrEmpty(codeChallenge)) {
+                                url += $"&code_challenge={System.Net.WebUtility.UrlEncode(codeChallenge)}";
+                            }
+                            
+                            if (!string.IsNullOrEmpty(codeChallengeMethod)) {
+                                url += $"&code_challenge_method={System.Net.WebUtility.UrlEncode(codeChallengeMethod)}";
+                            }
+                            
+                            return url;
                         }" />
                         
                         <!-- Redirect to authorization endpoint -->
@@ -1375,11 +1756,10 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     
                                     // Get the normalized (human-readable) redirect URI for display
                                     string normalizedRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                                    context.Trace($"DEBUG: Normalized redirect URI for display: {normalizedRedirectUri}");
                                     
-                                    // Use the original encoded version for form submission
-                                    string originalRedirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
-                                    context.Trace($"DEBUG: Original redirect URI for form: {originalRedirectUri}");
+                                    // Use the normalized redirect URI for form submission to ensure consistency
+                                    string formRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                                    string htmlEncodedFormUri = System.Net.WebUtility.HtmlEncode(formRedirectUri);
                                     
                                     string state = context.Variables.GetValueOrDefault<string>("state", "");
                                     string csrfToken = context.Variables.GetValueOrDefault<string>("csrf_token", "");
@@ -1399,6 +1779,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     template = template.Replace("__CLIENT_ID__", System.Net.WebUtility.HtmlEncode(clientId));
                                     template = template.Replace("__REDIRECT_URI__", System.Net.WebUtility.HtmlEncode(normalizedRedirectUri));
                                     template = template.Replace("__STATE__", System.Net.WebUtility.HtmlEncode(state));
+                                    template = template.Replace("__CODE_CHALLENGE__", System.Net.WebUtility.HtmlEncode(context.Variables.GetValueOrDefault<string>("code_challenge", "")));
+                                    template = template.Replace("__CODE_CHALLENGE_METHOD__", System.Net.WebUtility.HtmlEncode(context.Variables.GetValueOrDefault<string>("code_challenge_method", "")));
                                     template = template.Replace("__CSRF_TOKEN__", System.Net.WebUtility.HtmlEncode(csrfToken));
                                     template = template.Replace("__CONSENT_ACTION_URL__", basePath + "/consent");                                    
                                     // Handle space-separated OAuth scopes and create individual list items with HTML encoding
@@ -1411,8 +1793,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     
                                     template = template.Replace("__OAUTH_SCOPES__", scopeList.ToString());
                                     
-                                    // Replace form field placeholder with HTML-encoded URI
-                                    template = template.Replace(FORM_FIELD_PLACEHOLDER, System.Net.WebUtility.HtmlEncode(originalRedirectUri));
+                                    // Replace form field placeholder with HTML-encoded normalized URI for consistency
+                                    template = template.Replace(FORM_FIELD_PLACEHOLDER, htmlEncodedFormUri);
                                     
                                     return template;
                                 }" />
@@ -1437,7 +1819,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                         <value>strict-origin-when-cross-origin</value>
                                     </set-header>
                                     <set-header name="Content-Security-Policy" exists-action="override">
-                                        <value>default-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'</value>
+                                        <value>default-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self' https:</value>
                                     </set-header>
                                     <set-header name="Cache-Control" exists-action="override">
                                         <value>no-store, no-cache, must-revalidate</value>
