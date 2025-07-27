@@ -114,12 +114,17 @@
                             string codeChallenge = context.Variables.GetValueOrDefault<string>("mcpClientCodeChallenge");
                             string codeChallengeMethod = context.Variables.GetValueOrDefault<string>("mcpClientCodeChallengeMethod");
                             
-                            // URL encode parameters (redirectUri is already normalized/decoded, so encoding once is correct)
+                            // URL encode parameters for the consent redirect URL
                             string encodedClientId = System.Net.WebUtility.UrlEncode(clientId);
                             string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
-                            string encodedState = System.Net.WebUtility.UrlEncode(state);
-                            string encodedCodeChallenge = System.Net.WebUtility.UrlEncode(codeChallenge);
-                            string encodedCodeChallengeMethod = System.Net.WebUtility.UrlEncode(codeChallengeMethod);
+                            
+                            // State parameter: use as-is without additional encoding
+                            // context.Request.Url.Query.GetValueOrDefault() preserves the original encoding
+                            string encodedState = state;
+                            
+                            // Code challenge parameters: use as-is since they typically don't need encoding
+                            string encodedCodeChallenge = codeChallenge;
+                            string encodedCodeChallengeMethod = codeChallengeMethod;
                             
                             return $"{basePath}/consent?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}&code_challenge={encodedCodeChallenge}&code_challenge_method={encodedCodeChallengeMethod}";
                         }</value>

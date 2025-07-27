@@ -24,8 +24,8 @@
                         // Split only on the first '=' to handle values that contain '='
                         string[] keyValue = pair.Split(new char[] {'='}, 2);
                         if (keyValue.Length == 2 && keyValue[0] == "client_id") {
-                            string decoded = System.Net.WebUtility.UrlDecode(keyValue[1]);
-                            return decoded;
+                            // For client_id, decode once since it's typically used for lookup operations
+                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
                         }
                     }
                 }
@@ -60,6 +60,7 @@
         }" />       
         <set-variable name="state" value="@{
             // For POST requests, extract from form body; for GET requests, extract from query string
+            // IMPORTANT: Preserve state as-is without decoding to prevent double-encoding
             if (context.Request.Method == "POST") {
                 string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
                 if (contentType.Contains("application/x-www-form-urlencoded")) {
@@ -69,19 +70,23 @@
                         // Split only on the first '=' to handle values that contain '='
                         string[] keyValue = pair.Split(new char[] {'='}, 2);
                         if (keyValue.Length == 2 && keyValue[0] == "state") {
-                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
+                            // Return raw encoded value to prevent double-encoding when form is resubmitted
+                            return keyValue[1];
                         }
                     }
                 }
                 return "";
             } else {
-                return (string)context.Request.Url.Query.GetValueOrDefault("state", "");
+                // For GET requests, just use the state as-is (already encoded)
+                string rawState = (string)context.Request.Url.Query.GetValueOrDefault("state", "");
+                return rawState ?? "";
             }
         }" />
         
         <!-- Extract PKCE parameters -->
         <set-variable name="code_challenge" value="@{
             // For POST requests, extract from form body; for GET requests, extract from query string
+            // IMPORTANT: Preserve code_challenge as-is without decoding to prevent double-encoding
             if (context.Request.Method == "POST") {
                 string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
                 if (contentType.Contains("application/x-www-form-urlencoded")) {
@@ -90,7 +95,8 @@
                     foreach (string pair in pairs) {
                         string[] keyValue = pair.Split(new char[] {'='}, 2);
                         if (keyValue.Length == 2 && keyValue[0] == "code_challenge") {
-                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
+                            // Return raw encoded value to prevent double-encoding when form is resubmitted
+                            return keyValue[1];
                         }
                     }
                 }
@@ -102,6 +108,7 @@
         
         <set-variable name="code_challenge_method" value="@{
             // For POST requests, extract from form body; for GET requests, extract from query string
+            // IMPORTANT: Preserve code_challenge_method as-is without decoding to prevent double-encoding
             if (context.Request.Method == "POST") {
                 string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
                 if (contentType.Contains("application/x-www-form-urlencoded")) {
@@ -110,7 +117,8 @@
                     foreach (string pair in pairs) {
                         string[] keyValue = pair.Split(new char[] {'='}, 2);
                         if (keyValue.Length == 2 && keyValue[0] == "code_challenge_method") {
-                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
+                            // Return raw encoded value to prevent double-encoding when form is resubmitted
+                            return keyValue[1];
                         }
                     }
                 }
@@ -189,7 +197,7 @@ __COMMON_STYLES__
         <h1 class='denial-heading'>Client Not Found</h1>
         <p>The client registration for the specified client was not found.</p>
         <div class='client-info'>
-            <p><strong>Client ID:</strong> <code>__CLIENT_ID__</code></p>
+            <p><strong>Client ID:</strong> <code>__CLIENT_ID_DISPLAY__</code></p>
             <p><strong>Redirect URI:</strong> <code>__REDIRECT_URI__</code></p>
         </div>
         <p>Please ensure that you are using a properly registered client application.</p>
@@ -524,7 +532,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
         <div class='client-info'>
             <p><strong>Application Name:</strong> <code>__CLIENT_NAME__</code></p>
             <p><strong>Application Website:</strong> <code>__CLIENT_URI__</code></p>
-            <p><strong>Application ID:</strong> <code>__CLIENT_ID__</code></p>
+            <p><strong>Application ID:</strong> <code>__CLIENT_ID_DISPLAY__</code></p>
             <p><strong>Redirect URI:</strong> <code>__REDIRECT_URI__</code></p>
         </div>        
         <p>The application will have access to the following scopes, used by <strong>{{MCPServerName}}</strong>:</p>
@@ -534,7 +542,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             </ul>
         </div>        <div class='buttons'>
             <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>
-                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
+                <input type='hidden' name='client_id' value='__CLIENT_ID_FORM__'>
                 <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
                 <input type='hidden' name='state' value='__STATE__'>
                 <input type='hidden' name='code_challenge' value='__CODE_CHALLENGE__'>
@@ -544,7 +552,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 <button type='submit' class='btn btn-primary'>Allow</button>
             </form>
             
-            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>                <input type='hidden' name='client_id' value='__CLIENT_ID__'>
+            <form method='post' action='__CONSENT_ACTION_URL__' style='display: inline-block;'>                <input type='hidden' name='client_id' value='__CLIENT_ID_FORM__'>
                 <input type='hidden' name='redirect_uri' value='__REDIRECT_URI__'>
                 <input type='hidden' name='state' value='__STATE__'>
                 <input type='hidden' name='code_challenge' value='__CODE_CHALLENGE__'>
@@ -1733,7 +1741,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                         
                                         // Replace placeholders with HTML-encoded content to prevent XSS
                                         template = template.Replace("__COMMON_STYLES__", commonStyles);
-                                        template = template.Replace("__CLIENT_ID__", System.Net.WebUtility.HtmlEncode(clientId));
+                                        template = template.Replace("__CLIENT_ID_DISPLAY__", System.Net.WebUtility.HtmlEncode(clientId));
                                         template = template.Replace("__REDIRECT_URI__", System.Net.WebUtility.HtmlEncode(redirectUri));
                                         
                                         return template;
@@ -1773,12 +1781,17 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     // First, create a temporary placeholder for the form fields
                                     template = template.Replace("value='__REDIRECT_URI__'", "value='" + FORM_FIELD_PLACEHOLDER + "'");
                                       
-                                    // Replace template placeholders with HTML-encoded values to prevent XSS
+                                    // Replace template placeholders with properly encoded values
                                     template = template.Replace("__CLIENT_NAME__", System.Net.WebUtility.HtmlEncode(clientName));
                                     template = template.Replace("__CLIENT_URI__", System.Net.WebUtility.HtmlEncode(clientUri));
-                                    template = template.Replace("__CLIENT_ID__", System.Net.WebUtility.HtmlEncode(clientId));
+                                    // For display purposes, use HtmlEncode for safety
+                                    template = template.Replace("__CLIENT_ID_DISPLAY__", System.Net.WebUtility.HtmlEncode(clientId));
                                     template = template.Replace("__REDIRECT_URI__", System.Net.WebUtility.HtmlEncode(normalizedRedirectUri));
-                                    template = template.Replace("__STATE__", System.Net.WebUtility.HtmlEncode(state));
+                                    // For form field values, use HtmlEncode for XSS protection
+                                    template = template.Replace("__CLIENT_ID_FORM__", System.Net.WebUtility.HtmlEncode(clientId));
+                                    // State needs to be URL-decoded first since it comes URL-encoded from query, then HTML-encoded for form safety
+                                    string decodedState = System.Net.WebUtility.UrlDecode(state);
+                                    template = template.Replace("__STATE__", System.Net.WebUtility.HtmlEncode(decodedState));
                                     template = template.Replace("__CODE_CHALLENGE__", System.Net.WebUtility.HtmlEncode(context.Variables.GetValueOrDefault<string>("code_challenge", "")));
                                     template = template.Replace("__CODE_CHALLENGE_METHOD__", System.Net.WebUtility.HtmlEncode(context.Variables.GetValueOrDefault<string>("code_challenge_method", "")));
                                     template = template.Replace("__CSRF_TOKEN__", System.Net.WebUtility.HtmlEncode(csrfToken));
