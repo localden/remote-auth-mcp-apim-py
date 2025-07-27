@@ -1010,26 +1010,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                 string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
                                 string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
                                 
-                                // Get detailed origin information for debugging
-                                string originHeader = context.Request.Headers.GetValueOrDefault("Origin", "");
-                                string refererHeader = context.Request.Headers.GetValueOrDefault("Referer", "");
-                                string targetOrigin = "{{APIMGatewayURL}}";
-                                
-                                string detailedMessage = "Request origin validation failed.\\n\\n";
-                                detailedMessage += "Debugging Info:\\n";
-                                detailedMessage += $"• Request Method: {context.Request.Method}\\n";
-                                detailedMessage += $"• Origin Header: {(string.IsNullOrEmpty(originHeader) ? "Not present" : originHeader)}\\n";
-                                detailedMessage += $"• Referer Header: {(string.IsNullOrEmpty(refererHeader) ? "Not present" : refererHeader)}\\n";
-                                detailedMessage += $"• Expected Origin: {targetOrigin}\\n";
-                                
-                                if (!string.IsNullOrEmpty(originHeader)) {
-                                    detailedMessage += $"\\nIssue: Origin header '{originHeader}' does not match expected origin '{targetOrigin}'.\\n";
-                                } else if (!string.IsNullOrEmpty(refererHeader)) {
-                                    detailedMessage += $"\\nIssue: Referer header '{refererHeader}' does not match expected origin '{targetOrigin}'.\\n";
-                                } else {
-                                    detailedMessage += $"\\nIssue: Neither Origin nor Referer headers are present in the request.\\n";
-                                }
-                                detailedMessage += "\\nThis may indicate a cross-site request forgery attempt.";
+                                string detailedMessage = "Access denied.";
                                 
                                 // Replace placeholders with actual content
                                 errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
@@ -1060,18 +1041,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                         string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
                                         string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
                                         
-                                        // Get detailed fetch metadata information
-                                        string secFetchSite = context.Request.Headers.GetValueOrDefault("Sec-Fetch-Site", "");
-                                        string secFetchMode = context.Request.Headers.GetValueOrDefault("Sec-Fetch-Mode", "");
-                                        string secFetchDest = context.Request.Headers.GetValueOrDefault("Sec-Fetch-Dest", "");
-                                        
-                                        string detailedMessage = "Fetch metadata validation failed.\\n\\n";
-                                        detailedMessage += "Debugging Info:\\n";
-                                        detailedMessage += $"• Request Method: {context.Request.Method}\\n";
-                                        detailedMessage += $"• Sec-Fetch-Site: {(string.IsNullOrEmpty(secFetchSite) ? "Not present" : secFetchSite)}\\n";
-                                        detailedMessage += $"• Sec-Fetch-Mode: {(string.IsNullOrEmpty(secFetchMode) ? "Not present" : secFetchMode)}\\n";
-                                        detailedMessage += $"• Sec-Fetch-Dest: {(string.IsNullOrEmpty(secFetchDest) ? "Not present" : secFetchDest)}\\n";
-                                        detailedMessage += $"\\nIssue: Sec-Fetch-Site header value '{secFetchSite}' indicates a cross-site request, which is not allowed for security reasons.";
+                                        string detailedMessage = "Access denied.";
                                         
                                         // Replace placeholders with actual content
                                         errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
@@ -1088,176 +1058,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     <when condition="@(context.Variables.GetValueOrDefault<string>("csrf_validation_result") != "valid")">
                                         <!-- CSRF validation failed -->
                                         <set-variable name="csrf_error_message" value="@{
-                                            string result = context.Variables.GetValueOrDefault<string>("csrf_validation_result", "unknown");
-                                            
-                                            // Return specific error message based on the failure reason with detailed debugging info
-                                            switch (result) {
-                                                case "missing_token":
-                                                    return "CSRF token validation failed: No security token was provided with the request.\\n\\n" +
-                                                           "Debugging Info:\\n" +
-                                                           $"• Request Method: {context.Request.Method}\\n" +
-                                                           $"• Content-Type: {context.Request.Headers.GetValueOrDefault("Content-Type", "N/A")}\\n" +
-                                                           "• Expected: A valid CSRF token in the form data\\n\\n" +
-                                                           "Please refresh the page and try again.";
-                                                           
-                                                case "invalid_token":
-                                                    string submittedToken = context.Variables.GetValueOrDefault<string>("csrf_token_from_form", "");
-                                                    string cacheKey = $"CSRF-{submittedToken}";
-                                                    return "CSRF token validation failed: The security token provided is invalid or has expired.\\n\\n" +
-                                                           "Debugging Info:\\n" +
-                                                           $"• Request Method: {context.Request.Method}\\n" +
-                                                           $"• Submitted Token: {submittedToken}\\n" +
-                                                           $"• Cache Key Lookup: {cacheKey}\\n" +
-                                                           $"• Token found in cache: No\\n" +
-                                                           $"• Cache Duration: 900 seconds (15 minutes)\\n" +
-                                                           $"• Possible causes:\\n" +
-                                                           "  - Token has expired (15 min limit)\\n" +
-                                                           "  - Token was already used and removed from cache\\n" +
-                                                           "  - Cache was cleared or restarted\\n" +
-                                                           "  - Token was generated on different server instance\\n" +
-                                                           "  - Form was submitted without proper GET request first\\n\\n" +
-                                                           "Please refresh the page and try again.";
-                                                           
-                                                case "malformed_token":
-                                                    string tokenData = context.Variables.GetValueOrDefault<string>("csrf_token_data", "");
-                                                    return "CSRF token validation failed: The security token format is invalid.\\n\\n" +
-                                                           "Debugging Info:\\n" +
-                                                           $"• Token Data from Cache: {tokenData}\\n" +
-                                                           $"• Expected Format: client_id:redirect_uri:YYYY-MM-DDTHH:mm:ssZ\\n" +
-                                                           $"• Issue: Could not parse timestamp or client data\\n\\n" +
-                                                           "Please refresh the page and try again.";
-                                                           
-                                                case "client_mismatch":
-                                                    string tokenData2 = context.Variables.GetValueOrDefault<string>("csrf_token_data", "");
-                                                    string currentClientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                                                    
-                                                    string detailedMsg = "CSRF token validation failed: The security token was issued for a different client application.\\n\\n";
-                                                    detailedMsg += "Debugging Info:\\n";
-                                                    detailedMsg += $"• Current Client ID: {currentClientId}\\n";
-                                                    
-                                                    if (!string.IsNullOrEmpty(tokenData2)) {
-                                                        try {
-                                                            var timestampPattern = @":\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$";
-                                                            var timestampMatch = System.Text.RegularExpressions.Regex.Match(tokenData2, timestampPattern);
-                                                            if (timestampMatch.Success) {
-                                                                string clientAndRedirect = tokenData2.Substring(0, timestampMatch.Index);
-                                                                int firstColonIndex = clientAndRedirect.IndexOf(':');
-                                                                if (firstColonIndex != -1) {
-                                                                    string tokenClientId = clientAndRedirect.Substring(0, firstColonIndex);
-                                                                    detailedMsg += $"• Token Client ID: {tokenClientId}\\n";
-                                                                }
-                                                            }
-                                                        } catch (Exception ex) {
-                                                            detailedMsg += $"• Error parsing token: {ex.Message}\\n";
-                                                        }
-                                                    }
-                                                    
-                                                    detailedMsg += "\\nPlease refresh the page and try again.";
-                                                    return detailedMsg;
-                                                    
-                                                case "redirect_mismatch":
-                                                    // For redirect mismatch, include detailed comparison information
-                                                    string tokenData3 = context.Variables.GetValueOrDefault<string>("csrf_token_data", "");
-                                                    string currentRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                                                    string rawRedirectUri = context.Variables.GetValueOrDefault<string>("redirect_uri", "");
-                                                    
-                                                    string detailedMessage = "CSRF token validation failed: The security token was issued for a different redirect URI.\\n\\n";
-                                                    detailedMessage += "Debugging Info:\\n";
-                                                    detailedMessage += $"• Current Raw Redirect URI: {rawRedirectUri}\\n";
-                                                    detailedMessage += $"• Current Normalized Redirect URI: {currentRedirectUri}\\n";
-                                                    
-                                                    if (!string.IsNullOrEmpty(tokenData3)) {
-                                                        try {
-                                                            // Parse token data carefully since both redirect_uri and timestamp contain colons
-                                                            var timestampPattern = @":\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$";
-                                                            var timestampMatch = System.Text.RegularExpressions.Regex.Match(tokenData3, timestampPattern);
-                                                            
-                                                            if (timestampMatch.Success) {
-                                                                // Extract everything before the timestamp as client_id:redirect_uri
-                                                                string clientAndRedirect = tokenData3.Substring(0, timestampMatch.Index);
-                                                                
-                                                                // Split on first colon to separate client_id and redirect_uri
-                                                                int firstColonIndex = clientAndRedirect.IndexOf(':');
-                                                                if (firstColonIndex != -1) {
-                                                                    string tokenRedirectUri = clientAndRedirect.Substring(firstColonIndex + 1);
-                                                                    detailedMessage += $"• Token Redirect URI: {tokenRedirectUri}\\n";
-                                                                    detailedMessage += $"• Token URI Length: {tokenRedirectUri.Length}\\n";
-                                                                    detailedMessage += $"• Current URI Length: {currentRedirectUri?.Length ?? 0}\\n";
-                                                                    
-                                                                    // Show character-by-character comparison for first few differences
-                                                                    if (tokenRedirectUri != null && currentRedirectUri != null) {
-                                                                        detailedMessage += "\\nCharacter-by-Character Analysis (first 10 differences):\\n";
-                                                                        int maxLen = Math.Max(tokenRedirectUri.Length, currentRedirectUri.Length);
-                                                                        int diffCount = 0;
-                                                                        for (int i = 0; i < maxLen && diffCount < 10; i++) {
-                                                                            char tokenChar = i < tokenRedirectUri.Length ? tokenRedirectUri[i] : '?';
-                                                                            char currentChar = i < currentRedirectUri.Length ? currentRedirectUri[i] : '?';
-                                                                            if (tokenChar != currentChar) {
-                                                                                detailedMessage += $"• Position {i}: token='{tokenChar}' (ASCII {(int)tokenChar}) vs current='{currentChar}' (ASCII {(int)currentChar})\\n";
-                                                                                diffCount++;
-                                                                            }
-                                                                        }
-                                                                        if (diffCount == 0) {
-                                                                            detailedMessage += "• URLs appear identical character-by-character but length differs\\n";
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        } catch (Exception ex) {
-                                                            detailedMessage += $"• Error parsing token data: {ex.Message}\\n";
-                                                        }
-                                                    }
-                                                    
-                                                    detailedMessage += "\\nPlease refresh the page and try again.";
-                                                    return detailedMessage;
-                                                    
-                                                case "expired_token":
-                                                    string tokenData4 = context.Variables.GetValueOrDefault<string>("csrf_token_data", "");
-                                                    string ageInfo = "";
-                                                    
-                                                    if (!string.IsNullOrEmpty(tokenData4)) {
-                                                        try {
-                                                            var timestampPattern = @":\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$";
-                                                            var timestampMatch = System.Text.RegularExpressions.Regex.Match(tokenData4, timestampPattern);
-                                                            if (timestampMatch.Success) {
-                                                                string timestampStr = timestampMatch.Value.Substring(1);
-                                                                DateTime tokenTime = DateTime.Parse(timestampStr);
-                                                                TimeSpan age = DateTime.UtcNow - tokenTime;
-                                                                ageInfo = $"\\n• Token Age: {age.TotalMinutes:F1} minutes (limit: 15 minutes)";
-                                                            }
-                                                        } catch (Exception) {
-                                                            ageInfo = "\\n• Could not calculate token age";
-                                                        }
-                                                    }
-                                                    
-                                                    return "CSRF token validation failed: The security token has expired.\\n\\n" +
-                                                           "Debugging Info:\\n" +
-                                                           $"• Token limit: 15 minutes{ageInfo}\\n\\n" +
-                                                           "Please refresh the page and try again.";
-                                                           
-                                                case "invalid_timestamp":
-                                                    return "CSRF token validation failed: The security token timestamp is invalid.\\n\\n" +
-                                                           "Debugging Info:\\n" +
-                                                           $"• Token Data: {context.Variables.GetValueOrDefault<string>("csrf_token_data", "")}\\n" +
-                                                           $"• Expected timestamp format: YYYY-MM-DDTHH:mm:ssZ\\n\\n" +
-                                                           "Please refresh the page and try again.";
-                                                           
-                                                case "validation_error":
-                                                    return "CSRF token validation failed: An error occurred while validating the security token.\\n\\n" +
-                                                           "Debugging Info:\\n" +
-                                                           $"• Request Method: {context.Request.Method}\\n" +
-                                                           $"• Submitted Token: {context.Variables.GetValueOrDefault<string>("csrf_token_from_form", "")}\\n" +
-                                                           $"• Token Data: {context.Variables.GetValueOrDefault<string>("csrf_token_data", "")}\\n\\n" +
-                                                           "Please refresh the page and try again.";
-                                                           
-                                                default:
-                                                    return $"CSRF token validation failed: Unknown error ({result}).\\n\\n" +
-                                                           "Debugging Info:\\n" +
-                                                           $"• Validation Result: {result}\\n" +
-                                                           $"• Request Method: {context.Request.Method}\\n" +
-                                                           $"• Submitted Token: {context.Variables.GetValueOrDefault<string>("csrf_token_from_form", "")}\\n\\n" +
-                                                           "Please refresh the page and try again.";
-                                            }
+                                            return "Access denied.";
                                         }" />
                                         
                                         <return-response>
