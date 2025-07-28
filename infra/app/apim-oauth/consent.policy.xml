@@ -11,120 +11,101 @@
 <policies>
     <inbound>        
         <base />        
-        <!-- Extract request parameters -->
-        <set-variable name="client_id" value="@{
-            // Extract from form body (POST) or query string (GET)
+        <!-- Helper function to extract parameters from form/query -->
+        <set-variable name="form_body" value="@{
             if (context.Request.Method == "POST") {
                 string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
                 if (contentType.Contains("application/x-www-form-urlencoded")) {
-                    string body = context.Request.Body.As<string>(preserveContent: true);
-                    string[] pairs = body.Split('&');
-                    foreach (string pair in pairs) {
-                        // Split on first '=' to handle values containing '='
-                        string[] keyValue = pair.Split(new char[] {'='}, 2);
-                        if (keyValue.Length == 2 && keyValue[0] == "client_id") {
-                            // Decode once for lookup operations
-                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
-                        }
-                    }
+                    return context.Request.Body.As<string>(preserveContent: true);
                 }
-                return "";
-            } else {
-                string clientId = (string)context.Request.Url.Query.GetValueOrDefault("client_id", "");
-                return clientId;
             }
-        }" />
-        <set-variable name="redirect_uri" value="@{
-            // Extract from form body (POST) or query string (GET)
-            if (context.Request.Method == "POST") {
-                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
-                if (contentType.Contains("application/x-www-form-urlencoded")) {
-                    string body = context.Request.Body.As<string>(preserveContent: true);
-                    string[] pairs = body.Split('&');
-                    foreach (string pair in pairs) {
-                        // Split on first '=' to handle URLs with parameters
-                        string[] keyValue = pair.Split(new char[] {'='}, 2);
-                        if (keyValue.Length == 2 && keyValue[0] == "redirect_uri") {
-                            // Keep encoded, let normalization handle decoding
-                            return keyValue[1];
-                        }
-                    }
-                }
-                return "";
-            } else {
-                // Keep encoded, let normalization handle decoding
-                string redirectUri = (string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", "");
-                return redirectUri;
-            }
-        }" />       
-        <set-variable name="state" value="@{
-            // Extract from form body (POST) or query string (GET)
-            // Keep state encoded to prevent double-encoding issues
-            if (context.Request.Method == "POST") {
-                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
-                if (contentType.Contains("application/x-www-form-urlencoded")) {
-                    string body = context.Request.Body.As<string>(preserveContent: true);
-                    string[] pairs = body.Split('&');
-                    foreach (string pair in pairs) {
-                        // Split on first '=' to handle values containing '='
-                        string[] keyValue = pair.Split(new char[] {'='}, 2);
-                        if (keyValue.Length == 2 && keyValue[0] == "state") {
-                            // Keep raw encoded value to prevent double-encoding
-                            return keyValue[1];
-                        }
-                    }
-                }
-                return "";
-            } else {
-                // Use state as-is from query string (already encoded)
-                string rawState = (string)context.Request.Url.Query.GetValueOrDefault("state", "");
-                return rawState ?? "";
-            }
+            return "";
         }" />
         
-        <!-- Extract PKCE parameters -->
-        <set-variable name="code_challenge" value="@{
-            // Extract from form body (POST) or query string (GET)
-            // Keep code_challenge encoded to prevent double-encoding
-            if (context.Request.Method == "POST") {
-                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
-                if (contentType.Contains("application/x-www-form-urlencoded")) {
-                    string body = context.Request.Body.As<string>(preserveContent: true);
-                    string[] pairs = body.Split('&');
-                    foreach (string pair in pairs) {
-                        string[] keyValue = pair.Split(new char[] {'='}, 2);
-                        if (keyValue.Length == 2 && keyValue[0] == "code_challenge") {
-                            // Keep raw encoded value to prevent double-encoding
-                            return keyValue[1];
-                        }
+        <!-- Extract request parameters using consolidated logic -->
+        <set-variable name="client_id" value="@{
+            string formBody = context.Variables.GetValueOrDefault<string>("form_body", "");
+            
+            // Check form data first (POST)
+            if (!string.IsNullOrEmpty(formBody)) {
+                string[] pairs = formBody.Split('&');
+                foreach (string pair in pairs) {
+                    string[] keyValue = pair.Split(new char[] {'='}, 2);
+                    if (keyValue.Length == 2 && keyValue[0] == "client_id") {
+                        return System.Net.WebUtility.UrlDecode(keyValue[1]);
                     }
                 }
-                return "";
-            } else {
-                return (string)context.Request.Url.Query.GetValueOrDefault("code_challenge", "");
             }
+            // Fallback to query string (GET)
+            return (string)context.Request.Url.Query.GetValueOrDefault("client_id", "");
+        }" />
+        
+        <set-variable name="redirect_uri" value="@{
+            string formBody = context.Variables.GetValueOrDefault<string>("form_body", "");
+            
+            // Check form data first (POST)
+            if (!string.IsNullOrEmpty(formBody)) {
+                string[] pairs = formBody.Split('&');
+                foreach (string pair in pairs) {
+                    string[] keyValue = pair.Split(new char[] {'='}, 2);
+                    if (keyValue.Length == 2 && keyValue[0] == "redirect_uri") {
+                        return keyValue[1]; // Keep encoded for normalization
+                    }
+                }
+            }
+            // Fallback to query string (GET)
+            return (string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", "");
+        }" />
+        
+        <set-variable name="state" value="@{
+            string formBody = context.Variables.GetValueOrDefault<string>("form_body", "");
+            
+            // Check form data first (POST)
+            if (!string.IsNullOrEmpty(formBody)) {
+                string[] pairs = formBody.Split('&');
+                foreach (string pair in pairs) {
+                    string[] keyValue = pair.Split(new char[] {'='}, 2);
+                    if (keyValue.Length == 2 && keyValue[0] == "state") {
+                        return keyValue[1]; // Keep encoded
+                    }
+                }
+            }
+            // Fallback to query string (GET)
+            return (string)context.Request.Url.Query.GetValueOrDefault("state", "") ?? "";
+        }" />
+        
+        <set-variable name="code_challenge" value="@{
+            string formBody = context.Variables.GetValueOrDefault<string>("form_body", "");
+            
+            // Check form data first (POST)
+            if (!string.IsNullOrEmpty(formBody)) {
+                string[] pairs = formBody.Split('&');
+                foreach (string pair in pairs) {
+                    string[] keyValue = pair.Split(new char[] {'='}, 2);
+                    if (keyValue.Length == 2 && keyValue[0] == "code_challenge") {
+                        return keyValue[1]; // Keep encoded
+                    }
+                }
+            }
+            // Fallback to query string (GET)
+            return (string)context.Request.Url.Query.GetValueOrDefault("code_challenge", "");
         }" />
         
         <set-variable name="code_challenge_method" value="@{
-            // Extract from form body (POST) or query string (GET)
-            // Keep code_challenge_method encoded to prevent double-encoding
-            if (context.Request.Method == "POST") {
-                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
-                if (contentType.Contains("application/x-www-form-urlencoded")) {
-                    string body = context.Request.Body.As<string>(preserveContent: true);
-                    string[] pairs = body.Split('&');
-                    foreach (string pair in pairs) {
-                        string[] keyValue = pair.Split(new char[] {'='}, 2);
-                        if (keyValue.Length == 2 && keyValue[0] == "code_challenge_method") {
-                            // Keep raw encoded value to prevent double-encoding
-                            return keyValue[1];
-                        }
+            string formBody = context.Variables.GetValueOrDefault<string>("form_body", "");
+            
+            // Check form data first (POST)
+            if (!string.IsNullOrEmpty(formBody)) {
+                string[] pairs = formBody.Split('&');
+                foreach (string pair in pairs) {
+                    string[] keyValue = pair.Split(new char[] {'='}, 2);
+                    if (keyValue.Length == 2 && keyValue[0] == "code_challenge_method") {
+                        return keyValue[1]; // Keep encoded
                     }
                 }
-                return "";
-            } else {
-                return (string)context.Request.Url.Query.GetValueOrDefault("code_challenge_method", "");
             }
+            // Fallback to query string (GET)
+            return (string)context.Request.Url.Query.GetValueOrDefault("code_challenge_method", "");
         }" />
       
          <set-variable name="access_denied_template" value="@{
@@ -178,6 +159,19 @@ __COMMON_STYLES__
     </div>
 </body>
 </html>";
+        }" />
+        
+        <!-- Reusable function to generate 403 error response -->
+        <set-variable name="generate_403_response" value="@{
+            string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
+            string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
+            string message = "Access denied.";
+            
+            // Replace placeholders with actual content
+            errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
+            errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", message);
+            
+            return errorTemplate;
         }" />
             <!-- Error page template -->
         <set-variable name="client_not_found_template" value="@{
@@ -722,24 +716,14 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
         }" />
         
         <set-variable name="consent_action" value="@{
-            // Extract consent action from POST form data
-            if (context.Request.Method == "POST")
-            {
-                // Validate content type
-                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
-                // Parse form data
-                if (contentType.Contains("application/x-www-form-urlencoded"))
-                {
-                    string body = context.Request.Body.As<string>(preserveContent: true);
-                    string[] pairs = body.Split('&');
-                    foreach (string pair in pairs)
-                    {
-                        // Split on first '=' to handle values containing '='
-                        string[] keyValue = pair.Split(new char[] {'='}, 2);
-                        if (keyValue.Length == 2 && keyValue[0] == "consent_action")
-                        {
-                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
-                        }
+            string formBody = context.Variables.GetValueOrDefault<string>("form_body", "");
+            
+            if (!string.IsNullOrEmpty(formBody)) {
+                string[] pairs = formBody.Split('&');
+                foreach (string pair in pairs) {
+                    string[] keyValue = pair.Split(new char[] {'='}, 2);
+                    if (keyValue.Length == 2 && keyValue[0] == "consent_action") {
+                        return System.Net.WebUtility.UrlDecode(keyValue[1]);
                     }
                 }
                 // Fallback to JSON parsing if form parsing failed
@@ -750,21 +734,14 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
         
         <!-- Extract CSRF token from form data -->
         <set-variable name="csrf_token_from_form" value="@{
-            if (context.Request.Method == "POST")
-            {
-                string contentType = context.Request.Headers.GetValueOrDefault("Content-Type", "");
-                if (contentType.Contains("application/x-www-form-urlencoded"))
-                {
-                    string body = context.Request.Body.As<string>(preserveContent: true);
-                    string[] pairs = body.Split('&');
-                    foreach (string pair in pairs)
-                    {
-                        // Split on first '=' to handle values containing '='
-                        string[] keyValue = pair.Split(new char[] {'='}, 2);
-                        if (keyValue.Length == 2 && keyValue[0] == "csrf_token")
-                        {
-                            return System.Net.WebUtility.UrlDecode(keyValue[1]);
-                        }
+            string formBody = context.Variables.GetValueOrDefault<string>("form_body", "");
+            
+            if (!string.IsNullOrEmpty(formBody)) {
+                string[] pairs = formBody.Split('&');
+                foreach (string pair in pairs) {
+                    string[] keyValue = pair.Split(new char[] {'='}, 2);
+                    if (keyValue.Length == 2 && keyValue[0] == "csrf_token") {
+                        return System.Net.WebUtility.UrlDecode(keyValue[1]);
                     }
                 }
             }
@@ -1006,18 +983,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             <set-header name="Pragma" exists-action="override">
                                 <value>no-cache</value>
                             </set-header>
-                            <set-body>@{
-                                string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
-                                string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
-                                
-                                string detailedMessage = "Access denied.";
-                                
-                                // Replace placeholders with actual content
-                                errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
-                                errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", detailedMessage);
-                                
-                                return errorTemplate;
-                            }</set-body>
+                            <set-body>@(context.Variables.GetValueOrDefault<string>("generate_403_response"))</set-body>
                         </return-response>
                     </when>
                     <otherwise>
@@ -1037,18 +1003,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     <set-header name="Pragma" exists-action="override">
                                         <value>no-cache</value>
                                     </set-header>
-                                    <set-body>@{
-                                        string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
-                                        string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
-                                        
-                                        string detailedMessage = "Access denied.";
-                                        
-                                        // Replace placeholders with actual content
-                                        errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
-                                        errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", detailedMessage);
-                                        
-                                        return errorTemplate;
-                                    }</set-body>
+                                    <set-body>@(context.Variables.GetValueOrDefault<string>("generate_403_response"))</set-body>
                                 </return-response>
                             </when>
                             <otherwise>
@@ -1057,10 +1012,6 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                 <choose>
                                     <when condition="@(context.Variables.GetValueOrDefault<string>("csrf_validation_result") != "valid")">
                                         <!-- CSRF validation failed -->
-                                        <set-variable name="csrf_error_message" value="@{
-                                            return "Access denied.";
-                                        }" />
-                                        
                                         <return-response>
                                             <set-status code="403" reason="Forbidden" />
                                             <set-header name="Content-Type" exists-action="override">
@@ -1072,17 +1023,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                             <set-header name="Pragma" exists-action="override">
                                                 <value>no-cache</value>
                                             </set-header>
-                                            <set-body>@{
-                                                string errorTemplate = context.Variables.GetValueOrDefault<string>("access_denied_template");
-                                                string commonStyles = context.Variables.GetValueOrDefault<string>("common_styles");
-                                                string errorMessage = context.Variables.GetValueOrDefault<string>("csrf_error_message");
-                                                
-                                                // Replace placeholders with actual content
-                                                errorTemplate = errorTemplate.Replace("__COMMON_STYLES__", commonStyles);
-                                                errorTemplate = errorTemplate.Replace("__DENIAL_MESSAGE__", errorMessage);
-                                                
-                                                return errorTemplate;
-                                            }</set-body>
+                                            <set-body>@(context.Variables.GetValueOrDefault<string>("generate_403_response"))</set-body>
                                         </return-response>
                                     </when>
                                     <otherwise>
@@ -1097,55 +1038,16 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         <set-variable name="response_redirect_location" value="@{
                             string baseUrl = "{{APIMGatewayURL}}";
                             
-                            // Get client_id, redirect_uri, and state from form data first
-                            string clientId = "";
-                            string redirectUri = "";
-                            string state = "";
-                            
-                            string body = context.Request.Body.As<string>(preserveContent: true);
-                            string[] pairs = body.Split('&');
-                            foreach (string pair in pairs)
-                            {
-                                // Split only on the first '=' to handle values that contain '='
-                                string[] keyValue = pair.Split(new char[] {'='}, 2);
-                                if (keyValue.Length == 2)
-                                {
-                                    if (keyValue[0] == "client_id")
-                                    {
-                                        clientId = System.Net.WebUtility.UrlDecode(keyValue[1]);
-                                    }
-                                    else if (keyValue[0] == "redirect_uri")
-                                    {
-                                        redirectUri = System.Net.WebUtility.UrlDecode(keyValue[1]);
-                                    }
-                                    else if (keyValue[0] == "state")
-                                    {
-                                        state = System.Net.WebUtility.UrlDecode(keyValue[1]);
-                                    }
-                                }
-                            }
-                            
-                            // If we couldn't extract the values from form data, fall back to context variables
-                            if (string.IsNullOrEmpty(clientId))
-                            {
-                                clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                            }
-                            
-                            if (string.IsNullOrEmpty(redirectUri))
-                            {
-                                // Use the normalized (decoded) redirect URI for consistency
-                                redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                            }
-                            
-                            if (string.IsNullOrEmpty(state))
-                            {
-                                state = context.Variables.GetValueOrDefault<string>("state", "");
-                            }
+                            // Use already extracted parameters instead of re-parsing form data
+                            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                            string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                            string state = context.Variables.GetValueOrDefault<string>("state", "");
                             
                             // URL encode parameters to prevent injection attacks
                             string encodedClientId = System.Net.WebUtility.UrlEncode(clientId);
                             string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
-                            string encodedState = System.Net.WebUtility.UrlEncode(state);
+                            // State is already properly encoded from form submission, don't double-encode
+                            string encodedState = state;
                             
                             // Add PKCE parameters if they exist
                             string codeChallenge = context.Variables.GetValueOrDefault<string>("code_challenge", "");
@@ -1167,42 +1069,9 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         <set-variable name="approval_cookie" value="@{
                             string cookieName = "MCP_APPROVED_CLIENTS";
                             
-                            // Extract client_id and redirect_uri directly from the POST form data
-                            string clientId = "";
-                            string redirectUri = "";
-                            
-                            // Get form data to extract parameters
-                            string body = context.Request.Body.As<string>(preserveContent: true);
-                            string[] pairs = body.Split('&');
-                            foreach (string pair in pairs)
-                            {
-                                // Split only on the first '=' to handle values that contain '='
-                                string[] keyValue = pair.Split(new char[] {'='}, 2);
-                                if (keyValue.Length == 2)
-                                {
-                                    if (keyValue[0] == "client_id")
-                                    {
-                                        clientId = System.Net.WebUtility.UrlDecode(keyValue[1]);
-                                    }
-                                    else if (keyValue[0] == "redirect_uri")
-                                    {
-                                        // Important - decode the redirect_uri from form data
-                                        redirectUri = System.Net.WebUtility.UrlDecode(keyValue[1]);
-                                    }
-                                }
-                            }
-                            
-                            // If we couldn't get values from the form, fall back to context variables
-                            if (string.IsNullOrEmpty(clientId))
-                            {
-                                clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                            }
-                            
-                            if (string.IsNullOrEmpty(redirectUri))
-                            {
-                                // Use the normalized version when falling back
-                                redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                            }
+                            // Use already extracted parameters instead of re-parsing form data
+                            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                            string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                             
                             // Create a unique identifier for this client/redirect combination
                             string clientKey = $"{clientId}:{redirectUri}";
@@ -1283,42 +1152,9 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         <set-variable name="denial_cookie" value="@{
                             string cookieName = "MCP_DENIED_CLIENTS";
                             
-                            // Extract client_id and redirect_uri directly from the POST form data
-                            string clientId = "";
-                            string redirectUri = "";
-                            
-                            // Get form data to extract parameters
-                            string body = context.Request.Body.As<string>(preserveContent: true);
-                            string[] pairs = body.Split('&');
-                            foreach (string pair in pairs)
-                            {
-                                // Split only on the first '=' to handle values that contain '='
-                                string[] keyValue = pair.Split(new char[] {'='}, 2);
-                                if (keyValue.Length == 2)
-                                {
-                                    if (keyValue[0] == "client_id")
-                                    {
-                                        clientId = System.Net.WebUtility.UrlDecode(keyValue[1]);
-                                    }
-                                    else if (keyValue[0] == "redirect_uri")
-                                    {
-                                        // Important - decode the redirect_uri from form data
-                                        redirectUri = System.Net.WebUtility.UrlDecode(keyValue[1]);
-                                    }
-                                }
-                            }
-                            
-                            // If we couldn't get values from the form, fall back to context variables
-                            if (string.IsNullOrEmpty(clientId))
-                            {
-                                clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                            }
-                            
-                            if (string.IsNullOrEmpty(redirectUri))
-                            {
-                                // Use the normalized version when falling back
-                                redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                            }
+                            // Use already extracted parameters instead of re-parsing form data
+                            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                            string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                             
                             // Create a unique identifier for this client/redirect combination
                             string clientKey = $"{clientId}:{redirectUri}";
@@ -1458,7 +1294,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             // URL encode parameters to prevent injection attacks
                             string encodedClientId = System.Net.WebUtility.UrlEncode(clientId);
                             string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
-                            string encodedState = System.Net.WebUtility.UrlEncode(state);
+                            // State is already properly encoded, don't double-encode
+                            string encodedState = state;
                             
                             // Add PKCE parameters if they exist
                             string codeChallenge = context.Variables.GetValueOrDefault<string>("code_challenge", "");
