@@ -19,6 +19,15 @@ param entraResourceAppDisplayName string
 @description('The name of the MCP Server to display in the consent page')
 param mcpServerName string = 'MCP Server'
 
+@description('The CosmosDB account endpoint')
+param cosmosDbEndpoint string
+
+@description('The CosmosDB database name')
+param cosmosDbDatabaseName string
+
+@description('The CosmosDB container name for client registrations')
+param cosmosDbContainerName string
+
 resource apimService 'Microsoft.ApiManagement/service@2021-08-01' existing = {
   name: apimServiceName
 }
@@ -151,6 +160,37 @@ resource MCPServerNamedValue 'Microsoft.ApiManagement/service/namedValues@2021-0
   properties: {
     displayName: 'MCPServerName'
     value: mcpServerName
+    secret: false
+  }
+}
+
+// CosmosDB Named Values
+resource CosmosDbEndpointNamedValue 'Microsoft.ApiManagement/service/namedValues@2021-08-01' = {
+  parent: apimService
+  name: 'CosmosDbEndpoint'
+  properties: {
+    displayName: 'CosmosDbEndpoint'
+    value: cosmosDbEndpoint
+    secret: false
+  }
+}
+
+resource CosmosDbDatabaseNamedValue 'Microsoft.ApiManagement/service/namedValues@2021-08-01' = {
+  parent: apimService
+  name: 'CosmosDbDatabase'
+  properties: {
+    displayName: 'CosmosDbDatabase'
+    value: cosmosDbDatabaseName
+    secret: false
+  }
+}
+
+resource CosmosDbContainerNamedValue 'Microsoft.ApiManagement/service/namedValues@2021-08-01' = {
+  parent: apimService
+  name: 'CosmosDbContainer'
+  properties: {
+    displayName: 'CosmosDbContainer'
+    value: cosmosDbContainerName
     secret: false
   }
 }
