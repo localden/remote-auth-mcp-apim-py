@@ -109,8 +109,7 @@
         }" />
       
          <set-variable name="access_denied_template" value="@{
-            return @"<!DOCTYPE html>
-<html lang='en'>
+            return @"<html lang='en'>
 <head>    <meta charset='UTF-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <title>Access Denied</title>
@@ -175,8 +174,7 @@ __COMMON_STYLES__
         }" />
             <!-- Error page template -->
         <set-variable name="client_not_found_template" value="@{
-            return @"<!DOCTYPE html>
-<html lang='en'>
+            return @"<html lang='en'>
 <head>    
     <meta charset='UTF-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
@@ -497,8 +495,7 @@ __COMMON_STYLES__
         
         <!-- Consent page HTML template -->
         <set-variable name="consent_page_template" value="@{
-            return @"<!DOCTYPE html>
-<html lang='en'>
+            return @"<html lang='en'>
 <head>    <meta charset='UTF-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <title>Application Consent</title>
@@ -572,7 +569,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                 
                 // Cookie name for client denials
-                string DENIAL_COOKIE_NAME = "MCP_DENIED_CLIENTS";
+                string DENIAL_COOKIE_NAME = "__Host-MCP_DENIED_CLIENTS";
                 
                 // Check for denial cookie in request
                 var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
@@ -650,7 +647,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
                 
                 // Cookie name for client approvals
-                string APPROVAL_COOKIE_NAME = "MCP_APPROVED_CLIENTS";
+                string APPROVAL_COOKIE_NAME = "__Host-MCP_APPROVED_CLIENTS";
                 
                 // Check for approval cookie in request
                 var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
@@ -1035,19 +1032,47 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                             <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
                         <!-- Process consent approval -->
                         <set-variable name="response_status_code" value="302" />
+                        
+                        <!-- Generate a new, secure state parameter to prevent state fixation attacks -->
+                        <set-variable name="secure_consent_state" value="@{
+                            // Generate a cryptographically secure state parameter
+                            string guidPart = Guid.NewGuid().ToString("N");
+                            string timestampPart = DateTime.UtcNow.Ticks.ToString();
+                            string combinedString = guidPart + timestampPart;
+                            
+                            // Create URL-safe token by encoding combined string
+                            string secureState = System.Convert.ToBase64String(
+                                System.Text.Encoding.UTF8.GetBytes(combinedString)
+                            ).Replace("+", "-").Replace("/", "_").Replace("=", "").Substring(0, 32);
+                            
+                            return secureState;
+                        }" />
+                        
+                        <!-- Cache the original state with the new secure state for validation -->
+                        <cache-store-value key="@($"ConsentState-{context.Variables.GetValueOrDefault<string>("secure_consent_state")}")" 
+                                          value="@{
+                                              string originalState = context.Variables.GetValueOrDefault<string>("state", "");
+                                              string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                                              string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                                              string codeChallenge = context.Variables.GetValueOrDefault<string>("code_challenge", "");
+                                              string codeChallengeMethod = context.Variables.GetValueOrDefault<string>("code_challenge_method", "");
+                                              string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                                              
+                                              // Store all original request parameters for validation
+                                              return $"{originalState}:{clientId}:{redirectUri}:{codeChallenge}:{codeChallengeMethod}:{timestamp}";
+                                          }" 
+                                          duration="900" />
+                        
                         <set-variable name="response_redirect_location" value="@{
                             string baseUrl = "{{APIMGatewayURL}}";
-                            
-                            // Use already extracted parameters instead of re-parsing form data
+
                             string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
                             string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                            string state = context.Variables.GetValueOrDefault<string>("state", "");
+                            string secureState = context.Variables.GetValueOrDefault<string>("secure_consent_state", "");
                             
-                            // URL encode parameters to prevent injection attacks
                             string encodedClientId = System.Net.WebUtility.UrlEncode(clientId);
                             string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
-                            // State is already properly encoded from form submission, don't double-encode
-                            string encodedState = state;
+                            string encodedState = System.Net.WebUtility.UrlEncode(secureState);
                             
                             // Add PKCE parameters if they exist
                             string codeChallenge = context.Variables.GetValueOrDefault<string>("code_challenge", "");
@@ -1067,7 +1092,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         }" />
                           <!-- Calculate approval cookie value -->
                         <set-variable name="approval_cookie" value="@{
-                            string cookieName = "MCP_APPROVED_CLIENTS";
+                            string cookieName = "__Host-MCP_APPROVED_CLIENTS";
                             
                             // Use already extracted parameters instead of re-parsing form data
                             string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
@@ -1128,7 +1153,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         
                         <!-- Set variables for outbound policy awareness -->
                         <set-variable name="consent_approved" value="true" />
-                        <set-variable name="cookie_name" value="MCP_APPROVED_CLIENTS" />
+                        <set-variable name="cookie_name" value="__Host-MCP_APPROVED_CLIENTS" />
                         
                         <!-- Return the response with the cookie already set -->
                         <return-response>
@@ -1150,7 +1175,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         
                         <!-- Calculate the cookie value right here in inbound before returning response -->
                         <set-variable name="denial_cookie" value="@{
-                            string cookieName = "MCP_DENIED_CLIENTS";
+                            string cookieName = "__Host-MCP_DENIED_CLIENTS";
                             
                             // Use already extracted parameters instead of re-parsing form data
                             string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
@@ -1222,7 +1247,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         
                         <!-- Set variables for outbound policy awareness -->
                         <set-variable name="consent_denied" value="true" />
-                        <set-variable name="cookie_name" value="MCP_DENIED_CLIENTS" />
+                        <set-variable name="cookie_name" value="__Host-MCP_DENIED_CLIENTS" />
                         
                         <!-- Return the response with the cookie already set -->
                         <return-response>
@@ -1501,7 +1526,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             <when condition="@(context.Variables.GetValueOrDefault<bool>("consent_approved"))">
                 <set-header name="Set-Cookie" exists-action="append">
                     <value>@{
-                        string cookieName = context.Variables.GetValueOrDefault<string>("cookie_name", "MCP_APPROVED_CLIENTS");
+                        string cookieName = context.Variables.GetValueOrDefault<string>("cookie_name", "__Host-MCP_APPROVED_CLIENTS");
                         string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
                         // Use normalized redirect URI for cookies
                         string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
@@ -1571,7 +1596,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             <when condition="@(context.Variables.GetValueOrDefault<bool>("consent_denied"))">
                 <set-header name="Set-Cookie" exists-action="append">
                     <value>@{
-                        string cookieName = context.Variables.GetValueOrDefault<string>("cookie_name", "MCP_DENIED_CLIENTS");
+                        string cookieName = context.Variables.GetValueOrDefault<string>("cookie_name", "__Host-MCP_DENIED_CLIENTS");
                         string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
                         // Use normalized redirect URI for cookies
                         string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
