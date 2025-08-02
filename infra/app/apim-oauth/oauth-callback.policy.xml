@@ -88,7 +88,7 @@
                     <set-body>@{
                         var errorResponse = new JObject();
                         errorResponse["error"] = "invalid_state";
-                        errorResponse["error_description"] = "State parameter does not match consented state.;
+                        errorResponse["error_description"] = "State parameter does not match consented state.";
                         return errorResponse.ToString();
                     }</set-body>
                 </return-response>
