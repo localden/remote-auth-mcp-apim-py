@@ -66,11 +66,12 @@
                 foreach (string pair in pairs) {
                     string[] keyValue = pair.Split(new char[] {'='}, 2);
                     if (keyValue.Length == 2 && keyValue[0] == "state") {
-                        return keyValue[1]; // Keep encoded
+                        // URL decode the state value from form data
+                        return System.Net.WebUtility.UrlDecode(keyValue[1]);
                     }
                 }
             }
-            // Fallback to query string (GET)
+            // Fallback to query string (GET) - this is already decoded by APIM
             return (string)context.Request.Url.Query.GetValueOrDefault("state", "") ?? "";
         }" />
         
@@ -1033,46 +1034,17 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                         <!-- Process consent approval -->
                         <set-variable name="response_status_code" value="302" />
                         
-                        <!-- Generate a new, secure state parameter to prevent state fixation attacks -->
-                        <set-variable name="secure_consent_state" value="@{
-                            // Generate a cryptographically secure state parameter
-                            string guidPart = Guid.NewGuid().ToString("N");
-                            string timestampPart = DateTime.UtcNow.Ticks.ToString();
-                            string combinedString = guidPart + timestampPart;
-                            
-                            // Create URL-safe token by encoding combined string
-                            string secureState = System.Convert.ToBase64String(
-                                System.Text.Encoding.UTF8.GetBytes(combinedString)
-                            ).Replace("+", "-").Replace("/", "_").Replace("=", "").Substring(0, 32);
-                            
-                            return secureState;
-                        }" />
-                        
-                        <!-- Cache the original state with the new secure state for validation -->
-                        <cache-store-value key="@($"ConsentState-{context.Variables.GetValueOrDefault<string>("secure_consent_state")}")" 
-                                          value="@{
-                                              string originalState = context.Variables.GetValueOrDefault<string>("state", "");
-                                              string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                                              string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                                              string codeChallenge = context.Variables.GetValueOrDefault<string>("code_challenge", "");
-                                              string codeChallengeMethod = context.Variables.GetValueOrDefault<string>("code_challenge_method", "");
-                                              string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
-                                              
-                                              // Store all original request parameters for validation
-                                              return $"{originalState}:{clientId}:{redirectUri}:{codeChallenge}:{codeChallengeMethod}:{timestamp}";
-                                          }" 
-                                          duration="900" />
-                        
                         <set-variable name="response_redirect_location" value="@{
                             string baseUrl = "{{APIMGatewayURL}}";
 
                             string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
                             string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                            string secureState = context.Variables.GetValueOrDefault<string>("secure_consent_state", "");
+                            string originalState = context.Variables.GetValueOrDefault<string>("state", "");
                             
                             string encodedClientId = System.Net.WebUtility.UrlEncode(clientId);
                             string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
-                            string encodedState = System.Net.WebUtility.UrlEncode(secureState);
+                            // State should be used as-is since it's already properly formatted from the original request
+                            string encodedState = originalState;
                             
                             // Add PKCE parameters if they exist
                             string codeChallenge = context.Variables.GetValueOrDefault<string>("code_challenge", "");
@@ -1448,9 +1420,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     template = template.Replace("__REDIRECT_URI__", System.Net.WebUtility.HtmlEncode(normalizedRedirectUri));
                                     // For form field values, use HtmlEncode for XSS protection
                                     template = template.Replace("__CLIENT_ID_FORM__", System.Net.WebUtility.HtmlEncode(clientId));
-                                    // State needs to be URL-decoded first since it comes URL-encoded from query, then HTML-encoded for form safety
-                                    string decodedState = System.Net.WebUtility.UrlDecode(state);
-                                    template = template.Replace("__STATE__", System.Net.WebUtility.HtmlEncode(decodedState));
+                                    // State should be HTML-encoded for form safety (don't URL-decode first as it may already be in correct format)
+                                    template = template.Replace("__STATE__", System.Net.WebUtility.HtmlEncode(state));
                                     template = template.Replace("__CODE_CHALLENGE__", System.Net.WebUtility.HtmlEncode(context.Variables.GetValueOrDefault<string>("code_challenge", "")));
                                     template = template.Replace("__CODE_CHALLENGE_METHOD__", System.Net.WebUtility.HtmlEncode(context.Variables.GetValueOrDefault<string>("code_challenge_method", "")));
                                     template = template.Replace("__CSRF_TOKEN__", System.Net.WebUtility.HtmlEncode(csrfToken));
@@ -1513,6 +1484,18 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
     </backend>
     <outbound>
         <base />
+        
+        <!-- Add CORS headers for browser security -->
+        <set-header name="Access-Control-Allow-Origin" exists-action="override">
+            <value>{{APIMGatewayURL}}</value>
+        </set-header>
+        <set-header name="Access-Control-Allow-Credentials" exists-action="override">
+            <value>true</value>
+        </set-header>
+        <set-header name="Vary" exists-action="append">
+            <value>Origin</value>
+        </set-header>
+        
         <!-- Debug trace for variable verification -->
         <trace source="outbound-debug" severity="information">
             <message>@{

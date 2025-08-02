@@ -25,70 +25,26 @@
         <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />
         <set-variable name="currentState" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
         
-        <!-- STEP 2.1: Validate if state came from consent flow to prevent state fixation attacks -->
-        <cache-lookup-value key="@($"ConsentState-{context.Variables.GetValueOrDefault<string>("currentState")}")" variable-name="consent_state_data" />
-        
-        <set-variable name="is_consent_validated_state" value="@{
-            string consentStateData = context.Variables.GetValueOrDefault<string>("consent_state_data");
-            
-            if (string.IsNullOrEmpty(consentStateData)) {
-                return false; // State was not generated through consent flow
-            }
-            
-            try {
-                // Parse consent state data: originalState:clientId:redirectUri:codeChallenge:codeChallengeMethod:timestamp
-                string[] parts = consentStateData.Split(':');
-                if (parts.Length < 6) {
-                    return false;
-                }
-                
-                string originalState = parts[0];
-                string consentClientId = parts[1];
-                string consentRedirectUri = parts[2];
-                string consentCodeChallenge = parts[3];
-                string consentCodeChallengeMethod = parts[4];
-                string timestampStr = parts[5];
-                
-                // Validate that current request parameters match those from consent flow
-                string currentClientId = context.Variables.GetValueOrDefault<string>("clientId", "");
-                string currentRedirectUri = System.Net.WebUtility.UrlDecode(context.Variables.GetValueOrDefault<string>("redirect_uri", ""));
-                string currentCodeChallenge = context.Variables.GetValueOrDefault<string>("mcpClientCodeChallenge", "");
-                string currentCodeChallengeMethod = context.Variables.GetValueOrDefault<string>("mcpClientCodeChallengeMethod", "");
-                
-                // Constant-time comparison for security
-                bool clientMatches = (consentClientId == currentClientId);
-                bool redirectMatches = (consentRedirectUri == currentRedirectUri);
-                bool challengeMatches = (consentCodeChallenge == currentCodeChallenge);
-                bool challengeMethodMatches = (consentCodeChallengeMethod == currentCodeChallengeMethod);
-                
-                if (!clientMatches || !redirectMatches || !challengeMatches || !challengeMethodMatches) {
-                    return false;
-                }
-                
-                // Validate timestamp (should not be older than 15 minutes)
-                DateTime consentTime;
-                try {
-                    consentTime = DateTime.Parse(timestampStr);
-                } catch (Exception) {
-                    return false;
-                }
-                
-                TimeSpan age = DateTime.UtcNow - consentTime;
-                if (age.TotalMinutes > 15) {
-                    return false; // Consent state has expired
-                }
-                
-                return originalState; // Return the original state directly
-                
-            } catch (Exception) {
-                return false;
-            }
-        }" />
-        
-        <!-- Remove the consent state from cache to prevent reuse -->
+        <!-- Validate required OAuth parameters early -->
         <choose>
-            <when condition="@(context.Variables.GetValueOrDefault<string>("is_consent_validated_state") != "False")">
-                <cache-remove-value key="@($"ConsentState-{context.Variables.GetValueOrDefault<string>("currentState")}")" />
+            <when condition="@(string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("clientId")) || 
+                              string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("redirect_uri")) || 
+                              string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("currentState")))">
+                <return-response>
+                    <set-status code="400" reason="Bad Request" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-header name="Cache-Control" exists-action="override">
+                        <value>no-store, no-cache</value>
+                    </set-header>
+                    <set-body>@{
+                        return new JObject {
+                            ["error"] = "invalid_request",
+                            ["error_description"] = "Missing required parameters: client_id, redirect_uri, and state are all required for OAuth authorization"
+                        }.ToString();
+                    }</set-body>
+                </return-response>
             </when>
         </choose>
         
@@ -149,7 +105,7 @@
                                 }
                             }
                         } catch (Exception ex) {
-                            context.Trace($"Error parsing approval cookie: {ex.Message}");
+                            // Error parsing approval cookie - ignore and continue
                         }
                         break;
                     }
@@ -157,14 +113,14 @@
                 
                 return false;
             } catch (Exception ex) {
-                context.Trace($"Error checking approval cookie: {ex.Message}");
+                // Error checking approval cookie - return false
                 return false;
             }
         }" />
         
         <!-- Check if the client has been approved via secure cookie OR validated through consent flow -->
         <choose>
-            <when condition="@(context.Variables.GetValueOrDefault<bool>("has_approval_cookie") || context.Variables.GetValueOrDefault<string>("is_consent_validated_state") != "False")">
+            <when condition="@(context.Variables.GetValueOrDefault<bool>("has_approval_cookie") || context.Variables.GetValueOrDefault<bool>("is_consent_validated_state"))">
                 <!-- Continue with normal flow - client is authorized via secure cookie or validated consent state -->
             </when>
             <otherwise>
@@ -289,18 +245,13 @@
             key="@((string)context.Variables.GetValueOrDefault("entraState"))" 
             value="@(context.Variables.GetValueOrDefault("mcpConfirmConsentCode", ""))" />
 
-         <!-- Retrieve MCP Client State and Scope from request (Claude sends the state and scope param for binding the auth flow per request) -->
-         <!-- Use original state if this came from consent validation, otherwise use current state -->
+         <!-- Retrieve MCP Client State from request -->
          <set-variable name="mcpState" value="@{
-             // If state was validated through consent flow, use the original MCP client state
-             string validatedState = context.Variables.GetValueOrDefault<string>("is_consent_validated_state");
-             if (!string.IsNullOrEmpty(validatedState) && validatedState != "False") {
-                 return validatedState;
-             }
-             
-             // Otherwise, use the current state from the request
-             return (string)context.Request.Url.Query.GetValueOrDefault("state", "");
+             // Use the current state directly (original client state preserved through consent flow)
+             string currentState = (string)context.Request.Url.Query.GetValueOrDefault("state", "");
+             return currentState;
          }" />
+         
          <set-variable name="mcpScope" value="@((string)context.Request.Url.Query.GetValueOrDefault("scope", ""))" />
         
         <!-- Store MCP client PKCE data, client state and client callback redirect uri for verification during token exchange -->
@@ -321,7 +272,19 @@
         <base />
     </backend>
     <outbound>
-        <base />        
+        <base />
+        
+        <!-- Add CORS headers for browser security -->
+        <set-header name="Access-Control-Allow-Origin" exists-action="override">
+            <value>{{APIMGatewayURL}}</value>
+        </set-header>
+        <set-header name="Access-Control-Allow-Credentials" exists-action="override">
+            <value>true</value>
+        </set-header>
+        <set-header name="Vary" exists-action="append">
+            <value>Origin</value>
+        </set-header>
+        
         <!-- Return the response with a 302 status code for redirect -->
         <return-response>
             <set-status code="302" reason="Found" />
