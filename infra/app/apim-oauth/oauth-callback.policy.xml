@@ -13,6 +13,24 @@
         }" />
         <set-variable name="sessionState" value="@((string)context.Request.Url.Query.GetValueOrDefault("session_state", ""))" />
         
+        <!-- Validate required OAuth parameters -->
+        <choose>
+            <when condition="@(string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("authCode", "")) || string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("clientState", "")))">
+                <return-response>
+                    <set-status code="400" reason="Bad Request" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-body>@{
+                        var errorResponse = new JObject();
+                        errorResponse["error"] = "invalid_request";
+                        errorResponse["error_description"] = "Missing required OAuth callback parameters";
+                        return errorResponse.ToString();
+                    }</set-body>
+                </return-response>
+            </when>
+        </choose>
+        
         <!-- STEP 1.5: Validate that the state matches what the user consented to -->
         <set-variable name="consent_state_valid" value="@{
             try {
@@ -82,6 +100,25 @@
         
         <!-- STEP 2: Retrieve stored PKCE code verifier using the client state parameter -->
         <cache-lookup-value key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("clientState", ""))" variable-name="codeVerifier" />
+        
+        <!-- Validate that code verifier was found in cache -->
+        <choose>
+            <when condition="@(string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("codeVerifier", "")))">
+                <return-response>
+                    <set-status code="400" reason="Bad Request" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-body>@{
+                        var errorResponse = new JObject();
+                        errorResponse["error"] = "invalid_request";
+                        errorResponse["error_description"] = "Authorization session expired or invalid state parameter";
+                        return errorResponse.ToString();
+                    }</set-body>
+                </return-response>
+            </when>
+        </choose>
+        
         <!-- STEP 3: Set token request parameters -->
         <set-variable name="codeChallengeMethod" value="S256" />
         <set-variable name="redirectUri" value="{{OAuthCallbackUri}}" />
@@ -147,6 +184,24 @@
         <!-- STEP 6: Lookup MCP client redirect URI stored during authorization -->
         <cache-lookup-value key="@((string)context.Variables.GetValueOrDefault("clientState"))" variable-name="mcpConfirmConsentCode" />
         <cache-lookup-value key="@($"McpClientAuthData-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" variable-name="mcpClientData" />
+        
+        <!-- Validate that MCP client data was found in cache -->
+        <choose>
+            <when condition="@(string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("mcpConfirmConsentCode", "")) || string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("mcpClientData", "")))">
+                <return-response>
+                    <set-status code="400" reason="Bad Request" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-body>@{
+                        var errorResponse = new JObject();
+                        errorResponse["error"] = "invalid_request";
+                        errorResponse["error_description"] = "MCP client authorization session expired or invalid";
+                        return errorResponse.ToString();
+                    }</set-body>
+                </return-response>
+            </when>
+        </choose>
 
         <!-- STEP 8: Use the client's original state parameter directly -->
         <set-variable name="mcpState" value="@(context.Variables.GetValueOrDefault<string>("clientState"))" />
