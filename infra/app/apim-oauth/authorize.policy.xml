@@ -118,45 +118,13 @@
             }
         }" />
         
-        <!-- Check if the client has been approved via secure cookie OR validated through consent flow -->
+        <!-- Check if the client has been approved via secure cookie -->
         <choose>
-            <when condition="@(context.Variables.GetValueOrDefault<bool>("has_approval_cookie") || context.Variables.GetValueOrDefault<bool>("is_consent_validated_state"))">
-                <!-- Continue with normal flow - client is authorized via secure cookie or validated consent state -->
+            <when condition="@(context.Variables.GetValueOrDefault<bool>("has_approval_cookie"))">
+                <!-- Continue with normal flow - client is authorized via secure cookie -->
             </when>
             <otherwise>
-                <!-- Block access if someone is trying to use a consent-validated state without going through proper flow -->
-                <choose>
-                    <when condition="@(!string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("consent_state_data")))">
-                        <!-- Someone is trying to replay a consent-validated state - this is suspicious -->
-                        <return-response>
-                            <set-status code="403" reason="Forbidden" />
-                            <set-header name="Content-Type" exists-action="override">
-                                <value>text/html</value>
-                            </set-header>
-                            <set-header name="Cache-Control" exists-action="override">
-                                <value>no-store, no-cache</value>
-                            </set-header>
-                            <set-header name="Pragma" exists-action="override">
-                                <value>no-cache</value>
-                            </set-header>
-                            <set-body>@{
-                                return @"<!DOCTYPE html>
-<html lang=""en"">
-<head>
-    <meta charset=""UTF-8"">
-    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-    <title>Access Denied</title>
-</head>
-<body>
-    <h1>Access Denied</h1>
-    <p>Invalid authorization request. Please start the authorization process again.</p>
-</body>
-</html>";
-                            }</set-body>
-                        </return-response>
-                    </when>
-                    <otherwise>
-                        <!-- Redirect to consent page for user approval -->
+                <!-- Redirect to consent page for user approval -->
                 <return-response>
                     <set-status code="302" reason="Found" />
                     <set-header name="Location" exists-action="override">
@@ -185,8 +153,6 @@
                         }</value>
                     </set-header>
                 </return-response>
-                    </otherwise>
-                </choose>
             </otherwise>
         </choose>
         
