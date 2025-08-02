@@ -212,19 +212,7 @@
         <base />
     </backend>
     <outbound>
-        <base />
-        
-        <!-- Add CORS headers for browser security -->
-        <set-header name="Access-Control-Allow-Origin" exists-action="override">
-            <value>{{APIMGatewayURL}}</value>
-        </set-header>
-        <set-header name="Access-Control-Allow-Credentials" exists-action="override">
-            <value>true</value>
-        </set-header>
-        <set-header name="Vary" exists-action="append">
-            <value>Origin</value>
-        </set-header>
-        
+        <base />        
         <!-- Return the response with a 302 status code for redirect -->
         <return-response>
             <set-status code="302" reason="Found" />
