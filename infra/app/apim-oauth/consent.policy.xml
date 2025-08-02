@@ -1446,6 +1446,29 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     <set-header name="Pragma" exists-action="override">
                                         <value>no-cache</value>
                                     </set-header>
+                                    <!-- Store the state parameter in a secure cookie for validation -->
+                                    <set-header name="Set-Cookie" exists-action="append">
+                                        <value>@{
+                                            string state = context.Variables.GetValueOrDefault<string>("state", "");
+                                            string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
+                                            string redirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
+                                            
+                                            // Create consent context data
+                                            var consentData = new JObject {
+                                                ["state"] = state,
+                                                ["clientId"] = clientId,
+                                                ["redirectUri"] = redirectUri,
+                                                ["timestamp"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                                            };
+                                            
+                                            // Base64 encode the consent data
+                                            string consentDataJson = consentData.ToString(Newtonsoft.Json.Formatting.None);
+                                            string encodedConsentData = System.Convert.ToBase64String(
+                                                System.Text.Encoding.UTF8.GetBytes(consentDataJson));
+                                            
+                                            return $"__Host-MCP_CONSENT_STATE={encodedConsentData}; Max-Age=900; Path=/; Secure; HttpOnly; SameSite=Lax";
+                                        }</value>
+                                    </set-header>
                                     <set-body>@{
                                         return context.Variables.GetValueOrDefault<string>("consent_page", "");
                                     }</set-body>

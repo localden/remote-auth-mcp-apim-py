@@ -170,29 +170,28 @@
                 return System.Convert.ToBase64String(hash).TrimEnd('=').Replace('+', '-').Replace('/', '_');
             }
         }" />
-        <set-variable name="entraState" value="@((string)Guid.NewGuid().ToString())" />
         
-        <!-- Build the complete Entra ID URL -->
+        <!-- Build the complete Entra ID URL using client's original state -->
         <set-variable name="authUrl" value="@{
             string baseUrl = "https://login.microsoftonline.com/{{EntraIDTenantId}}/oauth2/v2.0/authorize";
             string codeChallenge = context.Variables.GetValueOrDefault("codeChallenge", "");
-            string entraState = context.Variables.GetValueOrDefault("entraState", "");
+            string clientState = context.Variables.GetValueOrDefault("currentState", "");
             
-            return $"{baseUrl}?response_type=code&client_id={{EntraIDClientId}}&redirect_uri={{OAuthCallbackUri}}&scope={{OAuthScopes}}&code_challenge={codeChallenge}&code_challenge_method=S256&state={entraState}";
+            return $"{baseUrl}?response_type=code&client_id={{EntraIDClientId}}&redirect_uri={{OAuthCallbackUri}}&scope={{OAuthScopes}}&code_challenge={codeChallenge}&code_challenge_method=S256&state={System.Net.WebUtility.UrlEncode(clientState)}";
         }" />
         
         <!-- STEP 5: Store authentication data in cache for use in callback -->
         <!-- Generate a confirmation code to return to the MCP client -->
         <set-variable name="mcpConfirmConsentCode" value="@((string)Guid.NewGuid().ToString())" />
         
-        <!-- Store code verifier for token exchange -->
+        <!-- Store code verifier for token exchange using client state -->
         <cache-store-value duration="3600" 
-            key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("entraState", ""))" 
+            key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("currentState", ""))" 
             value="@(context.Variables.GetValueOrDefault("codeVerifier", ""))" />
         
-        <!-- Map state to MCP confirmation code for callback -->
+        <!-- Map client state to MCP confirmation code for callback -->
         <cache-store-value duration="3600" 
-            key="@((string)context.Variables.GetValueOrDefault("entraState"))" 
+            key="@((string)context.Variables.GetValueOrDefault("currentState"))" 
             value="@(context.Variables.GetValueOrDefault("mcpConfirmConsentCode", ""))" />
 
         <!-- Store MCP client data -->
