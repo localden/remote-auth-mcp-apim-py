@@ -98,6 +98,80 @@
         <!-- Clear the consent state cookie since it's been validated -->
         <set-variable name="clear_consent_cookie" value="__Host-MCP_CONSENT_STATE=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Lax" />
         
+        <!-- STEP 1.75: Validate Entra ID state cookie correlation -->
+        <set-variable name="entra_state_valid" value="@{
+            try {
+                string returnedState = context.Variables.GetValueOrDefault<string>("clientState", "");
+                if (string.IsNullOrEmpty(returnedState)) {
+                    return false;
+                }
+                
+                // Extract Entra ID state from cookie
+                var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
+                if (string.IsNullOrEmpty(cookieHeader)) {
+                    return false;
+                }
+                
+                string cookieName = "__Host-MCP_ENTRA_STATE";
+                string[] cookies = cookieHeader.Split(';');
+                foreach (string cookie in cookies) {
+                    string trimmedCookie = cookie.Trim();
+                    if (trimmedCookie.StartsWith(cookieName + "=")) {
+                        string cookieValue = trimmedCookie.Substring(cookieName.Length + 1);
+                        string decodedValue = System.Net.WebUtility.UrlDecode(cookieValue);
+                        
+                        // Parse sessionId|clientState format
+                        string[] parts = decodedValue.Split('|');
+                        if (parts.Length != 2) {
+                            return false;
+                        }
+                        
+                        string sessionId = parts[0];
+                        string originalClientState = parts[1];
+                        
+                        // Validate that returned state matches our sessionId
+                        // (Entra ID returns the sessionId we sent as state parameter)
+                        if (string.IsNullOrEmpty(sessionId) || returnedState.Length != sessionId.Length) {
+                            return false;
+                        }
+                        
+                        // Constant-time comparison to prevent timing attacks
+                        int result = 0;
+                        for (int i = 0; i < returnedState.Length; i++) {
+                            result |= returnedState[i] ^ sessionId[i];
+                        }
+                        
+                        return (result == 0);
+                    }
+                }
+                
+                return false;
+            } catch (Exception ex) {
+                return false;
+            }
+        }" />
+        
+        <!-- Validate Entra ID state cookie -->
+        <choose>
+            <when condition="@(!context.Variables.GetValueOrDefault<bool>("entra_state_valid"))">
+                <return-response>
+                    <set-status code="400" reason="Bad Request" />
+                    <set-header name="Content-Type" exists-action="override">
+                        <value>application/json</value>
+                    </set-header>
+                    <set-body>@{
+                        var errorResponse = new JObject();
+                        errorResponse["error"] = "invalid_state";
+                        errorResponse["error_description"] = "Entra ID state correlation failed. Possible CSRF attack.";
+                        return errorResponse.ToString();
+                    }</set-body>
+                </return-response>
+            </when>
+        </choose>
+        
+        <!-- Clear the Entra ID state cookie since it's been validated -->
+        <set-variable name="clear_entra_state_cookie" value="__Host-MCP_ENTRA_STATE=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=None" />
+        
         <!-- STEP 2: Retrieve stored PKCE code verifier using the client state parameter -->
         <cache-lookup-value key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("clientState", ""))" variable-name="codeVerifier" />
         
@@ -230,6 +304,10 @@
             <!-- Clear the consent state cookie -->
             <set-header name="Set-Cookie" exists-action="append">
                 <value>@(context.Variables.GetValueOrDefault<string>("clear_consent_cookie"))</value>
+            </set-header>
+            <!-- Clear the Entra ID state cookie -->
+            <set-header name="Set-Cookie" exists-action="append">
+                <value>@(context.Variables.GetValueOrDefault<string>("clear_entra_state_cookie"))</value>
             </set-header>
             <set-body />
         </return-response>

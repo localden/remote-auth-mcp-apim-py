@@ -15,11 +15,10 @@
         <set-variable name="mcpClientCodeChallenge" value="@((string)context.Request.Url.Query.GetValueOrDefault("code_challenge", ""))" />
         <set-variable name="mcpClientCodeChallengeMethod" value="@((string)context.Request.Url.Query.GetValueOrDefault("code_challenge_method", ""))" />
         
-        <!-- Validate required OAuth parameters -->
+        <!-- Validate required OAuth parameters (state is optional per RFC 6749) -->
         <choose>
             <when condition="@(string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("clientId")) || 
-                              string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("redirect_uri")) || 
-                              string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("currentState")))">
+                              string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("redirect_uri")))">
                 <return-response>
                     <set-status code="400" reason="Bad Request" />
                     <set-header name="Content-Type" exists-action="override">
@@ -31,7 +30,7 @@
                     <set-body>@{
                         return new JObject {
                             ["error"] = "invalid_request",
-                            ["error_description"] = "Missing required parameters: client_id, redirect_uri, and state are all required for OAuth authorization"
+                            ["error_description"] = "Missing required parameters: client_id and redirect_uri are required for OAuth authorization"
                         }.ToString();
                     }</set-body>
                 </return-response>
@@ -146,15 +145,18 @@
                             string encodedClientId = System.Net.WebUtility.UrlEncode(clientId);
                             string encodedRedirectUri = System.Net.WebUtility.UrlEncode(redirectUri);
                             
-                            // State parameter: use as-is without additional encoding
-                            // context.Request.Url.Query.GetValueOrDefault() preserves the original encoding
-                            string encodedState = state;
+                            // Build URL with optional state parameter
+                            string url = $"{basePath}/consent?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}";
                             
-                            // Code challenge parameters: use as-is since they typically don't need encoding
-                            string encodedCodeChallenge = codeChallenge;
-                            string encodedCodeChallengeMethod = codeChallengeMethod;
+                            // Only add state parameter if it was provided by the client
+                            if (!string.IsNullOrEmpty(state)) {
+                                url += $"&state={state}";
+                            }
                             
-                            return $"{basePath}/consent?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}&code_challenge={encodedCodeChallenge}&code_challenge_method={encodedCodeChallengeMethod}";
+                            // Add PKCE parameters
+                            url += $"&code_challenge={codeChallenge}&code_challenge_method={codeChallengeMethod}";
+                            
+                            return url;
                         }</value>
                     </set-header>
                 </return-response>
@@ -171,27 +173,34 @@
             }
         }" />
         
-        <!-- Build the complete Entra ID URL using client's original state -->
+        <!-- Generate a unique session identifier when state is not provided by client -->
+        <set-variable name="sessionId" value="@{
+            string clientState = context.Variables.GetValueOrDefault<string>("currentState", "");
+            // If client provided state, use it; otherwise generate a unique session ID
+            return string.IsNullOrEmpty(clientState) ? Guid.NewGuid().ToString() : clientState;
+        }" />
+        
+        <!-- Build the complete Entra ID URL using our session identifier -->
         <set-variable name="authUrl" value="@{
             string baseUrl = "https://login.microsoftonline.com/{{EntraIDTenantId}}/oauth2/v2.0/authorize";
             string codeChallenge = context.Variables.GetValueOrDefault("codeChallenge", "");
-            string clientState = context.Variables.GetValueOrDefault("currentState", "");
+            string sessionId = context.Variables.GetValueOrDefault("sessionId", "");
             
-            return $"{baseUrl}?response_type=code&client_id={{EntraIDClientId}}&redirect_uri={{OAuthCallbackUri}}&scope={{OAuthScopes}}&code_challenge={codeChallenge}&code_challenge_method=S256&state={System.Net.WebUtility.UrlEncode(clientState)}";
+            return $"{baseUrl}?response_type=code&client_id={{EntraIDClientId}}&redirect_uri={{OAuthCallbackUri}}&scope={{OAuthScopes}}&code_challenge={codeChallenge}&code_challenge_method=S256&state={System.Net.WebUtility.UrlEncode(sessionId)}";
         }" />
         
         <!-- STEP 5: Store authentication data in cache for use in callback -->
         <!-- Generate a confirmation code to return to the MCP client -->
         <set-variable name="mcpConfirmConsentCode" value="@((string)Guid.NewGuid().ToString())" />
         
-        <!-- Store code verifier for token exchange using client state -->
+        <!-- Store code verifier for token exchange using session ID -->
         <cache-store-value duration="3600" 
-            key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("currentState", ""))" 
+            key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("sessionId", ""))" 
             value="@(context.Variables.GetValueOrDefault("codeVerifier", ""))" />
         
-        <!-- Map client state to MCP confirmation code for callback -->
+        <!-- Map session ID to MCP confirmation code for callback -->
         <cache-store-value duration="3600" 
-            key="@((string)context.Variables.GetValueOrDefault("currentState"))" 
+            key="@((string)context.Variables.GetValueOrDefault("sessionId"))" 
             value="@(context.Variables.GetValueOrDefault("mcpConfirmConsentCode", ""))" />
 
         <!-- Store MCP client data -->
@@ -212,11 +221,27 @@
     </backend>
     <outbound>
         <base />        
+        
+        <!-- STEP 6: Generate secure Entra ID state cookie before redirect -->
+        <set-variable name="entra_state_cookie" value="@{
+            string sessionId = context.Variables.GetValueOrDefault<string>("sessionId", "");
+            string clientState = context.Variables.GetValueOrDefault<string>("state", "");
+            
+            // Create state object with both session ID and original client state
+            string stateData = $"{sessionId}|{clientState}";
+            
+            // Create secure cookie with __Host- prefix
+            return $"__Host-MCP_ENTRA_STATE={System.Net.WebUtility.UrlEncode(stateData)}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=3600";
+        }" />
+        
         <!-- Return the response with a 302 status code for redirect -->
         <return-response>
             <set-status code="302" reason="Found" />
             <set-header name="Location" exists-action="override">
                 <value>@(context.Variables.GetValueOrDefault("authUrl", ""))</value>
+            </set-header>
+            <set-header name="Set-Cookie" exists-action="append">
+                <value>@(context.Variables.GetValueOrDefault<string>("entra_state_cookie"))</value>
             </set-header>
             <!-- Add cache control headers to ensure browser follows redirect -->
             <set-header name="Cache-Control" exists-action="override">

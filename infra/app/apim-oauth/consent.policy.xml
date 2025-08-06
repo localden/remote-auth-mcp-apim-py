@@ -286,7 +286,7 @@ __COMMON_STYLES__
                 return "";
             }
             
-            // Generate random CSRF token using Guid and timestamp
+            // Generate cryptographically secure random CSRF token (32 characters)
             string guidPart = Guid.NewGuid().ToString("N");
             string timestampPart = DateTime.UtcNow.Ticks.ToString();
             string combinedString = guidPart + timestampPart;
@@ -299,26 +299,21 @@ __COMMON_STYLES__
             return token;
         }" />
         
-        <!-- Cache CSRF token for validation (GET requests only) -->
+        <!-- Set CSRF token cookie for validation (GET requests only) -->
         <choose>
             <when condition="@(context.Request.Method == "GET" && !string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("csrf_token")))">
-                <cache-store-value key="@($"CSRF-{context.Variables.GetValueOrDefault<string>("csrf_token")}")" 
-                                  value="@{
-                                      string clientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                                      string normalizedRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                                      string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
-                                      string tokenData = $"{clientId}:{normalizedRedirectUri}:{timestamp}";
-                                      
-                                      // Add debugging metadata
-                                      string debugInfo = $"CACHED_AT:{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}";
-                                      return $"{tokenData}|{debugInfo}";
-                                  }" 
-                                  duration="900" />
-                <!-- Track token caching for debugging -->
+                <!-- Set secure CSRF token cookie -->
+                <set-variable name="csrf_cookie_header" value="@{
+                    string token = context.Variables.GetValueOrDefault<string>("csrf_token", "");
+                    return $"__Host-MCP_CSRF_TOKEN={token}; Max-Age=900; Path=/; Secure; HttpOnly; SameSite=Lax";
+                }" />
+                
+                <!-- Track token generation for debugging -->
                 <set-variable name="csrf_token_cached" value="true" />
             </when>
             <otherwise>
                 <set-variable name="csrf_token_cached" value="false" />
+                <set-variable name="csrf_cookie_header" value="" />
             </otherwise>
         </choose>
           <!-- Validate client registration -->
@@ -875,10 +870,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
             return true;
         }" />
         
-        <!-- Lookup CSRF token from cache -->
-        <cache-lookup-value key="@($"CSRF-{context.Variables.GetValueOrDefault<string>("csrf_token_from_form")}")" variable-name="csrf_token_data" />
-        
-        <!-- Validate CSRF token details -->
+        <!-- Validate CSRF token using cookie (Double Submit Cookie Pattern) -->
         <set-variable name="csrf_validation_result" value="@{
             if (context.Request.Method != "POST") {
                 return "valid"; // No validation needed for GET requests
@@ -889,104 +881,50 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                 return "missing_token";
             }
             
-            string tokenData = context.Variables.GetValueOrDefault<string>("csrf_token_data");
-            if (string.IsNullOrEmpty(tokenData)) {
-                return "invalid_token";
+            // Extract CSRF token from cookie
+            string cookieToken = "";
+            try {
+                var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
+                if (string.IsNullOrEmpty(cookieHeader)) {
+                    return "missing_cookie";
+                }
+                
+                string cookieName = "__Host-MCP_CSRF_TOKEN";
+                string[] cookies = cookieHeader.Split(';');
+                foreach (string cookie in cookies) {
+                    string trimmedCookie = cookie.Trim();
+                    if (trimmedCookie.StartsWith(cookieName + "=")) {
+                        cookieToken = trimmedCookie.Substring(cookieName.Length + 1);
+                        break;
+                    }
+                }
+                
+                if (string.IsNullOrEmpty(cookieToken)) {
+                    return "invalid_cookie";
+                }
+            } catch (Exception ex) {
+                return "cookie_parse_error";
             }
             
-            try {
-                // Extract token data (before debug info separator)
-                string actualTokenData = tokenData;
-                if (tokenData.Contains("|")) {
-                    actualTokenData = tokenData.Split('|')[0];
+            // Constant-time comparison to prevent timing attacks
+            bool tokensMatch = true;
+            if (submittedToken == null || cookieToken == null) {
+                tokensMatch = (submittedToken == cookieToken);
+            } else if (submittedToken.Length != cookieToken.Length) {
+                tokensMatch = false;
+            } else {
+                int result = 0;
+                for (int i = 0; i < submittedToken.Length; i++) {
+                    result |= submittedToken[i] ^ cookieToken[i];
                 }
-                
-                // Parse token data: client_id:redirect_uri:timestamp
-                // Since both redirect_uri and timestamp can contain colons, we need to be very careful
-                // The timestamp format is: YYYY-MM-DDTHH:mm:ssZ
-                // So we look for the last occurrence of a timestamp pattern
-                
-                // Find the last occurrence of a timestamp pattern (YYYY-MM-DDTHH:mm:ssZ)
-                var timestampPattern = @":\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$";
-                var timestampMatch = System.Text.RegularExpressions.Regex.Match(actualTokenData, timestampPattern);
-                
-                if (!timestampMatch.Success) {
-                    return "malformed_token";
-                }
-                
-                // Extract the timestamp (without the leading colon)
-                string timestampStr = timestampMatch.Value.Substring(1);
-                
-                // Extract everything before the timestamp match as the client_id:redirect_uri part
-                string clientAndRedirect = actualTokenData.Substring(0, timestampMatch.Index);
-                
-                // Split client_id:redirect_uri on the first colon only
-                int firstColonIndex = clientAndRedirect.IndexOf(':');
-                if (firstColonIndex == -1) {
-                    return "malformed_token";
-                }
-                
-                string tokenClientId = clientAndRedirect.Substring(0, firstColonIndex);
-                string tokenRedirectUri = clientAndRedirect.Substring(firstColonIndex + 1);
-                
-                // Validate client_id and redirect_uri match using constant-time comparison
-                string currentClientId = context.Variables.GetValueOrDefault<string>("client_id", "");
-                string currentRedirectUri = context.Variables.GetValueOrDefault<string>("normalized_redirect_uri", "");
-                
-                // Constant-time string comparison for client_id to prevent timing attacks
-                bool clientIdMatches = true;
-                if (tokenClientId == null || currentClientId == null) {
-                    clientIdMatches = (tokenClientId == currentClientId);
-                } else if (tokenClientId.Length != currentClientId.Length) {
-                    clientIdMatches = false;
-                } else {
-                    int result = 0;
-                    for (int i = 0; i < tokenClientId.Length; i++) {
-                        result |= tokenClientId[i] ^ currentClientId[i];
-                    }
-                    clientIdMatches = (result == 0);
-                }
-                
-                if (!clientIdMatches) {
-                    return "client_mismatch";
-                }
-                
-                // Constant-time string comparison for redirect_uri to prevent timing attacks
-                bool redirectUriMatches = true;
-                if (tokenRedirectUri == null || currentRedirectUri == null) {
-                    redirectUriMatches = (tokenRedirectUri == currentRedirectUri);
-                } else if (tokenRedirectUri.Length != currentRedirectUri.Length) {
-                    redirectUriMatches = false;
-                } else {
-                    int result = 0;
-                    for (int i = 0; i < tokenRedirectUri.Length; i++) {
-                        result |= tokenRedirectUri[i] ^ currentRedirectUri[i];
-                    }
-                    redirectUriMatches = (result == 0);
-                }
-                
-                if (!redirectUriMatches) {
-                    return "redirect_mismatch";
-                }
-                
-                // Validate timestamp (token should not be older than 15 minutes)
-                DateTime tokenTime;
-                try {
-                    tokenTime = DateTime.Parse(timestampStr);
-                } catch (Exception) {
-                    return "invalid_timestamp";
-                }
-                
-                TimeSpan age = DateTime.UtcNow - tokenTime;
-                if (age.TotalMinutes > 15) {
-                    return "expired_token";
-                }
-                
-                return "valid";
-                
-            } catch (Exception ex) {
-                return "validation_error";
+                tokensMatch = (result == 0);
             }
+            
+            if (!tokensMatch) {
+                return "token_mismatch";
+            }
+            
+            return "valid";
         }" />
         
         <!-- If this is a form submission, process the consent choice -->
@@ -1052,8 +990,8 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     </when>
                                     <otherwise>
                                         <!-- CSRF validation passed -->
-                                        <!-- Delete CSRF token from cache to prevent reuse -->
-                                        <cache-remove-value key="@($"CSRF-{context.Variables.GetValueOrDefault<string>("csrf_token_from_form")}")" />
+                                        <!-- Clear CSRF token cookie after successful validation -->
+                                        <set-variable name="clear_csrf_cookie" value="__Host-MCP_CSRF_TOKEN=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Lax" />
                                         
                                         <choose>
                                             <when condition="@(context.Variables.GetValueOrDefault<string>("consent_action") == "allow")">
@@ -1161,6 +1099,9 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             </set-header>
                             <set-header name="Set-Cookie" exists-action="append">
                                 <value>@(context.Variables.GetValueOrDefault<string>("approval_cookie"))</value>
+                            </set-header>
+                            <set-header name="Set-Cookie" exists-action="append">
+                                <value>@(context.Variables.GetValueOrDefault<string>("clear_csrf_cookie"))</value>
                             </set-header>
                         </return-response>
                     </when>
@@ -1343,6 +1284,9 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             <set-header name="Location" exists-action="override">
                                 <value>@(context.Variables.GetValueOrDefault<string>("response_redirect_location", ""))</value>
                             </set-header>
+                            <set-header name="Set-Cookie" exists-action="append">
+                                <value>@(context.Variables.GetValueOrDefault<string>("clear_csrf_cookie"))</value>
+                            </set-header>
                         </return-response>
                     </when>
                     
@@ -1493,6 +1437,10 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                                     </set-header>
                                     <set-header name="Pragma" exists-action="override">
                                         <value>no-cache</value>
+                                    </set-header>
+                                    <!-- Set CSRF token cookie for form protection -->
+                                    <set-header name="Set-Cookie" exists-action="append">
+                                        <value>@(context.Variables.GetValueOrDefault<string>("csrf_cookie_header", ""))</value>
                                     </set-header>
                                     <!-- Store the state parameter in a secure cookie for validation -->
                                     <set-header name="Set-Cookie" exists-action="append">
