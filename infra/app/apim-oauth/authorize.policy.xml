@@ -173,20 +173,27 @@
             }
         }" />
         
-        <!-- Generate a unique session identifier when state is not provided by client -->
+        <!-- Generate a unique session identifier for internal server session management -->
         <set-variable name="sessionId" value="@{
-            string clientState = context.Variables.GetValueOrDefault<string>("currentState", "");
-            // If client provided state, use it; otherwise generate a unique session ID
-            return string.IsNullOrEmpty(clientState) ? Guid.NewGuid().ToString() : clientState;
+            // Always generate a random session ID for security
+            // This ensures server controls the session identifier completely
+            return Guid.NewGuid().ToString();
         }" />
         
-        <!-- Build the complete Entra ID URL using our session identifier -->
+        <!-- Generate a separate state parameter for Entra ID -->
+        <set-variable name="entraidState" value="@{
+            // Generate a separate random identifier for Entra ID state parameter
+            // This keeps the Entra ID state separate from internal session management
+            return Guid.NewGuid().ToString();
+        }" />
+        
+        <!-- Build the complete Entra ID URL using the separate Entra ID state -->
         <set-variable name="authUrl" value="@{
             string baseUrl = "https://login.microsoftonline.com/{{EntraIDTenantId}}/oauth2/v2.0/authorize";
             string codeChallenge = context.Variables.GetValueOrDefault("codeChallenge", "");
-            string sessionId = context.Variables.GetValueOrDefault("sessionId", "");
+            string entraidState = context.Variables.GetValueOrDefault("entraidState", "");
             
-            return $"{baseUrl}?response_type=code&client_id={{EntraIDClientId}}&redirect_uri={{OAuthCallbackUri}}&scope={{OAuthScopes}}&code_challenge={codeChallenge}&code_challenge_method=S256&state={System.Net.WebUtility.UrlEncode(sessionId)}";
+            return $"{baseUrl}?response_type=code&client_id={{EntraIDClientId}}&redirect_uri={{OAuthCallbackUri}}&scope={{OAuthScopes}}&code_challenge={codeChallenge}&code_challenge_method=S256&state={System.Net.WebUtility.UrlEncode(entraidState)}";
         }" />
         
         <!-- STEP 5: Store authentication data in cache for use in callback -->
@@ -197,6 +204,11 @@
         <cache-store-value duration="3600" 
             key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("sessionId", ""))" 
             value="@(context.Variables.GetValueOrDefault("codeVerifier", ""))" />
+        
+        <!-- Map Entra ID state to session ID for callback correlation -->
+        <cache-store-value duration="3600" 
+            key="@("EntraidState-"+context.Variables.GetValueOrDefault("entraidState", ""))" 
+            value="@(context.Variables.GetValueOrDefault("sessionId", ""))" />
         
         <!-- Map session ID to MCP confirmation code for callback -->
         <cache-store-value duration="3600" 
@@ -225,10 +237,11 @@
         <!-- STEP 6: Generate secure Entra ID state cookie before redirect -->
         <set-variable name="entra_state_cookie" value="@{
             string sessionId = context.Variables.GetValueOrDefault<string>("sessionId", "");
-            string clientState = context.Variables.GetValueOrDefault<string>("state", "");
+            string entraidState = context.Variables.GetValueOrDefault<string>("entraidState", "");
+            string clientState = context.Variables.GetValueOrDefault<string>("currentState", "");
             
-            // Create state object with both session ID and original client state
-            string stateData = $"{sessionId}|{clientState}";
+            // Create state object with Entra ID state, session ID, and original client state
+            string stateData = $"{entraidState}|{sessionId}|{clientState}";
             
             // Create secure cookie with __Host- prefix
             return $"__Host-MCP_ENTRA_STATE={System.Net.WebUtility.UrlEncode(stateData)}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=3600";

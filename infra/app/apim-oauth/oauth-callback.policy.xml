@@ -7,7 +7,7 @@
         <base />
         <!-- STEP 1: Extract the authorization code and state from Entra ID callback -->
         <set-variable name="authCode" value="@((string)context.Request.Url.Query.GetValueOrDefault("code", ""))" />
-        <set-variable name="clientState" value="@{
+        <set-variable name="entra_returned_state" value="@{
             string stateValue = (string)context.Request.Url.Query.GetValueOrDefault("state", "");
             return !string.IsNullOrEmpty(stateValue) ? System.Net.WebUtility.UrlDecode(stateValue) : "";
         }" />
@@ -15,7 +15,7 @@
         
         <!-- Validate required OAuth parameters -->
         <choose>
-            <when condition="@(string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("authCode", "")) || string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("clientState", "")))">
+            <when condition="@(string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("authCode", "")) || string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("entra_returned_state", "")))">
                 <return-response>
                     <set-status code="400" reason="Bad Request" />
                     <set-header name="Content-Type" exists-action="override">
@@ -31,11 +31,42 @@
             </when>
         </choose>
         
-        <!-- STEP 1.5: Validate that the state matches what the user consented to -->
-        <set-variable name="consent_state_valid" value="@{
+        <!-- STEP 1.5: Extract original MCP client state from Entra ID state cookie -->
+        <set-variable name="mcp_original_state" value="@{
             try {
-                string returnedState = context.Variables.GetValueOrDefault<string>("clientState", "");
-                if (string.IsNullOrEmpty(returnedState)) {
+                // Extract Entra ID state from cookie to get the original client state
+                var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
+                if (string.IsNullOrEmpty(cookieHeader)) {
+                    return "";
+                }
+                
+                string cookieName = "__Host-MCP_ENTRA_STATE";
+                string[] cookies = cookieHeader.Split(';');
+                foreach (string cookie in cookies) {
+                    string trimmedCookie = cookie.Trim();
+                    if (trimmedCookie.StartsWith(cookieName + "=")) {
+                        string cookieValue = trimmedCookie.Substring(cookieName.Length + 1);
+                        string decodedValue = System.Net.WebUtility.UrlDecode(cookieValue);
+                        
+                        // Parse entraidState|sessionId|clientState format
+                        string[] parts = decodedValue.Split('|');
+                        if (parts.Length == 3) {
+                            return parts[2]; // Return the original client state
+                        }
+                    }
+                }
+                
+                return "";
+            } catch (Exception ex) {
+                return "";
+            }
+        }" />
+        
+        <!-- STEP 1.6: Validate that the original MCP client state matches what the user consented to -->
+        <set-variable name="mcp_consent_valid" value="@{
+            try {
+                string mcpOriginalState = context.Variables.GetValueOrDefault<string>("mcp_original_state", "");
+                if (string.IsNullOrEmpty(mcpOriginalState)) {
                     return false;
                 }
                 
@@ -55,16 +86,16 @@
                             System.Convert.FromBase64String(cookieValue));
                         JObject consentData = JObject.Parse(decodedValue);
                         
-                        string consentedState = consentData["state"]?.ToString();
+                        string mcp_consented_state = consentData["state"]?.ToString();
                         
                         // Constant-time comparison to prevent timing attacks
-                        if (string.IsNullOrEmpty(consentedState) || returnedState.Length != consentedState.Length) {
+                        if (string.IsNullOrEmpty(mcp_consented_state) || mcpOriginalState.Length != mcp_consented_state.Length) {
                             return false;
                         }
                         
                         int result = 0;
-                        for (int i = 0; i < returnedState.Length; i++) {
-                            result |= returnedState[i] ^ consentedState[i];
+                        for (int i = 0; i < mcpOriginalState.Length; i++) {
+                            result |= mcpOriginalState[i] ^ mcp_consented_state[i];
                         }
                         
                         return (result == 0);
@@ -79,7 +110,7 @@
         
         <!-- Validate consent state cookie -->
         <choose>
-            <when condition="@(!context.Variables.GetValueOrDefault<bool>("consent_state_valid"))">
+            <when condition="@(!context.Variables.GetValueOrDefault<bool>("mcp_consent_valid"))">
                 <return-response>
                     <set-status code="400" reason="Bad Request" />
                     <set-header name="Content-Type" exists-action="override">
@@ -99,17 +130,17 @@
         <set-variable name="clear_consent_cookie" value="__Host-MCP_CONSENT_STATE=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Lax" />
         
         <!-- STEP 1.75: Validate Entra ID state cookie correlation -->
-        <set-variable name="entra_state_valid" value="@{
+        <set-variable name="entra_validation_result" value="@{
             try {
-                string returnedState = context.Variables.GetValueOrDefault<string>("clientState", "");
-                if (string.IsNullOrEmpty(returnedState)) {
-                    return false;
+                string entraReturnedState = context.Variables.GetValueOrDefault<string>("entra_returned_state", "");
+                if (string.IsNullOrEmpty(entraReturnedState)) {
+                    return "invalid|";
                 }
                 
                 // Extract Entra ID state from cookie
                 var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
                 if (string.IsNullOrEmpty(cookieHeader)) {
-                    return false;
+                    return "invalid|";
                 }
                 
                 string cookieName = "__Host-MCP_ENTRA_STATE";
@@ -120,40 +151,58 @@
                         string cookieValue = trimmedCookie.Substring(cookieName.Length + 1);
                         string decodedValue = System.Net.WebUtility.UrlDecode(cookieValue);
                         
-                        // Parse sessionId|clientState format
+                        // Parse entraidState|sessionId|clientState format
                         string[] parts = decodedValue.Split('|');
-                        if (parts.Length != 2) {
-                            return false;
+                        if (parts.Length != 3) {
+                            return "invalid|";
                         }
                         
-                        string sessionId = parts[0];
-                        string originalClientState = parts[1];
+                        string entra_stored_state = parts[0];
+                        string session_id = parts[1];
+                        string mcp_stored_state = parts[2];
                         
-                        // Validate that returned state matches our sessionId
-                        // (Entra ID returns the sessionId we sent as state parameter)
-                        if (string.IsNullOrEmpty(sessionId) || returnedState.Length != sessionId.Length) {
-                            return false;
+                        // Validate that returned state matches our Entra ID state
+                        // (Entra ID returns the entraidState we sent as state parameter)
+                        if (string.IsNullOrEmpty(entra_stored_state) || entraReturnedState.Length != entra_stored_state.Length) {
+                            return "invalid|";
                         }
                         
                         // Constant-time comparison to prevent timing attacks
                         int result = 0;
-                        for (int i = 0; i < returnedState.Length; i++) {
-                            result |= returnedState[i] ^ sessionId[i];
+                        for (int i = 0; i < entraReturnedState.Length; i++) {
+                            result |= entraReturnedState[i] ^ entra_stored_state[i];
                         }
                         
-                        return (result == 0);
+                        // Return validation result and session ID as a combined value
+                        // Format: "valid|sessionId" or "invalid|"
+                        if (result == 0) {
+                            return $"valid|{session_id}";
+                        } else {
+                            return "invalid|";
+                        }
                     }
                 }
                 
-                return false;
+                return "invalid|";
             } catch (Exception ex) {
-                return false;
+                return "invalid|";
             }
+        }" />
+        
+        <!-- Extract session ID from validation result -->
+        <set-variable name="session_id" value="@{
+            string validationResult = context.Variables.GetValueOrDefault<string>("entra_validation_result", "invalid|");
+            string[] parts = validationResult.Split('|');
+            return parts.Length > 1 ? parts[1] : "";
         }" />
         
         <!-- Validate Entra ID state cookie -->
         <choose>
-            <when condition="@(!context.Variables.GetValueOrDefault<bool>("entra_state_valid"))">
+            <when condition="@{
+                string validationResult = context.Variables.GetValueOrDefault<string>("entra_validation_result", "invalid|");
+                string[] parts = validationResult.Split('|');
+                return parts.Length == 0 || parts[0] != "valid";
+            }">
                 <return-response>
                     <set-status code="400" reason="Bad Request" />
                     <set-header name="Content-Type" exists-action="override">
@@ -172,8 +221,8 @@
         <!-- Clear the Entra ID state cookie since it's been validated -->
         <set-variable name="clear_entra_state_cookie" value="__Host-MCP_ENTRA_STATE=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=None" />
         
-        <!-- STEP 2: Retrieve stored PKCE code verifier using the client state parameter -->
-        <cache-lookup-value key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("clientState", ""))" variable-name="codeVerifier" />
+        <!-- STEP 2: Retrieve stored PKCE code verifier using the session ID -->
+        <cache-lookup-value key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("session_id", ""))" variable-name="codeVerifier" />
         
         <!-- Validate that code verifier was found in cache -->
         <choose>
@@ -256,7 +305,7 @@
         }" />
 
         <!-- STEP 6: Lookup MCP client redirect URI stored during authorization -->
-        <cache-lookup-value key="@((string)context.Variables.GetValueOrDefault("clientState"))" variable-name="mcpConfirmConsentCode" />
+        <cache-lookup-value key="@((string)context.Variables.GetValueOrDefault("session_id"))" variable-name="mcpConfirmConsentCode" />
         <cache-lookup-value key="@($"McpClientAuthData-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" variable-name="mcpClientData" />
         
         <!-- Validate that MCP client data was found in cache -->
@@ -277,8 +326,8 @@
             </when>
         </choose>
 
-        <!-- STEP 8: Use the client's original state parameter directly -->
-        <set-variable name="mcpState" value="@(context.Variables.GetValueOrDefault<string>("clientState"))" />
+        <!-- STEP 8: Use the MCP client's original state parameter -->
+        <set-variable name="mcp_return_state" value="@(context.Variables.GetValueOrDefault<string>("mcp_original_state"))" />
         <!-- STEP 9: Extract the stored mcp client callback redirect uri from cache -->
         <set-variable name="callbackRedirectUri" value="@{
             var mcpAuthDataAsJObject = JObject.Parse((string)context.Variables["mcpClientData"]);
@@ -290,16 +339,16 @@
             key="@($"AccessToken-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" 
             value="@($"{context.Variables.GetValueOrDefault("encryptedSessionKey")}")" />
         
-        <!-- Store the Entra token for later use -->
+        <!-- Store the Entra token for later use (using the session ID from the OAuth flow) -->
         <cache-store-value duration="3600" 
-            key="@($"EntraToken-{context.Variables.GetValueOrDefault("sessionId")}")"
+            key="@($"EntraToken-{context.Variables.GetValueOrDefault("session_id")}")"
             value="@(context.Response.Body.As<JObject>(preserveContent: true).ToString())" />
         
         <!-- STEP 11: Redirect back to MCP client with confirmation code -->
         <return-response>
             <set-status code="302" reason="Found" />
             <set-header name="Location" exists-action="override">
-                <value>@($"{context.Variables.GetValueOrDefault("callbackRedirectUri")}?code={context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}&state={System.Net.WebUtility.UrlEncode((string)context.Variables.GetValueOrDefault("mcpState"))}")</value>
+                <value>@($"{context.Variables.GetValueOrDefault("callbackRedirectUri")}?code={context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}&state={System.Net.WebUtility.UrlEncode((string)context.Variables.GetValueOrDefault("mcp_return_state"))}")</value>
             </set-header>
             <!-- Clear the consent state cookie -->
             <set-header name="Set-Cookie" exists-action="append">
