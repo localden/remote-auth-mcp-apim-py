@@ -6,6 +6,7 @@ The sample also uses an authorization pattern where the client acquires a token 
 
 ## ⚠️ Important: Experimental Implementation
 
+>[!IMPORTANT]
 > **This is an experimental implementation and should NOT be used in production scenarios.** 
 > 
 > This sample demonstrates how to build a protected MCP server with Entra ID by implementing OAuth 2.0 Dynamic Client Registration and PKCE flow patterns that work around current gaps in Entra ID's native support for these standards. While it showcases the technical possibilities, it's intended for educational and proof-of-concept purposes only.
@@ -97,6 +98,7 @@ This implementation uses several security mechanisms and cookies to ensure a sec
 | `__Host-MCP_CSRF_TOKEN` | Protects against CSRF attacks on consent forms | `__Host-` prefix, Secure, HttpOnly, SameSite=Lax |
 
 **Key Security Features:**
+
 - 🔐 **PKCE (Proof Key for Code Exchange)** - Prevents authorization code interception
 - 🍪 **Secure Cookies** - All cookies use `__Host-` prefix for maximum security
 - 🛡️ **CSRF Protection** - Double-submit cookie pattern with constant-time validation
