@@ -339,9 +339,9 @@
             key="@($"AccessToken-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" 
             value="@($"{context.Variables.GetValueOrDefault("encryptedSessionKey")}")" />
         
-        <!-- Store the Entra token for later use (using the session ID from the OAuth flow) -->
+        <!-- Store the Entra token for later use (using the newly generated session ID) -->
         <cache-store-value duration="3600" 
-            key="@($"EntraToken-{context.Variables.GetValueOrDefault("session_id")}")"
+            key="@($"EntraToken-{context.Variables.GetValueOrDefault("sessionId")}")"
             value="@(context.Response.Body.As<JObject>(preserveContent: true).ToString())" />
         
         <!-- STEP 11: Redirect back to MCP client with confirmation code -->
