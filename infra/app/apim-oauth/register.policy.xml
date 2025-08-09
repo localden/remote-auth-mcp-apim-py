@@ -1,5 +1,11 @@
 <!--
-    REGISTER POLICY
+    REG        <!-- Extract client registration data from request -->
+        <set-variable name="requestBodyAsJObject" value="@(context.Request.Body.As<JObject>(preserveContent: true))" />
+        
+        <!-- Generate a unique client ID (GUID) -->
+        <set-variable name="generatedClientId" value="@((string)Guid.NewGuid().ToString())" />
+        
+        <!-- Prepare client info document for CosmosDB -->OLICY
     This policy implements the dynamic client registration endpoint for OAuth2 flow.
     
     Flow:
@@ -32,10 +38,10 @@
             return document.ToString();
         }" />
         
-        <!-- STEP 4: Get CosmosDB access token using managed identity -->
+        <!-- Get CosmosDB access token using managed identity -->
         <authentication-managed-identity resource="https://cosmos.azure.com" output-token-variable-name="cosmosAccessToken" />
         
-        <!-- STEP 5: Store client registration in CosmosDB using AAD token -->
+        <!-- Store client registration in CosmosDB using AAD token -->
         <send-request mode="new" response-variable-name="cosmosResponse" timeout="30" ignore-error="false">
             <set-url>@($"{{CosmosDbEndpoint}}/dbs/{{CosmosDbDatabase}}/colls/{{CosmosDbContainer}}/docs")</set-url>
             <set-method>POST</set-method>
@@ -54,7 +60,7 @@
             <set-body>@(context.Variables.GetValueOrDefault<string>("clientDocument"))</set-body>
         </send-request>
         
-        <!-- STEP 6: Check if CosmosDB operation was successful -->
+        <!-- Check if CosmosDB operation was successful -->
         <choose>
             <when condition="@(((IResponse)context.Variables["cosmosResponse"]).StatusCode >= 400)">
                 <return-response>
@@ -72,8 +78,8 @@
                 </return-response>
             </when>
         </choose>
-        
-        <!-- STEP 7: Cache the redirect URI for backward compatibility with other policies -->
+
+        <!-- Cache the redirect URI for backward compatibility with other policies -->
         <cache-store-value duration="3600" 
             key="ClientRedirectUri" 
             value="@(context.Variables.GetValueOrDefault<JObject>("requestBody")["redirect_uris"][0].ToString())" />
@@ -91,9 +97,14 @@
             }" />
         
         <!-- STEP 8: Set response content type -->
+                    value="@(context.Variables.GetValueOrDefault<string>("clientIdRedirectUri"))" />
+        
+        <!-- Set response content type -->
         <set-header name="Content-Type" exists-action="override">
             <value>application/json</value>
         </set-header>
+        
+        <!-- Return client credentials response -->
         
         <!-- STEP 9: Return client credentials response -->
         <return-response>

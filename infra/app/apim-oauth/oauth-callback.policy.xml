@@ -31,10 +31,9 @@
             </when>
         </choose>
         
-        <!-- STEP 1.5: Extract original MCP client state from Entra ID state cookie -->
+        <!-- Extract original MCP client state from Entra ID state cookie -->
         <set-variable name="mcp_original_state" value="@{
             try {
-                // Extract Entra ID state from cookie to get the original client state
                 var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
                 if (string.IsNullOrEmpty(cookieHeader)) {
                     return "";
@@ -62,7 +61,7 @@
             }
         }" />
         
-        <!-- STEP 1.6: Validate that the original MCP client state matches what the user consented to -->
+        <!-- Validate that the original MCP client state matches what the user consented to -->
         <set-variable name="mcp_consent_valid" value="@{
             try {
                 string mcpOriginalState = context.Variables.GetValueOrDefault<string>("mcp_original_state", "");
@@ -129,7 +128,7 @@
         <!-- Clear the consent state cookie since it's been validated -->
         <set-variable name="clear_consent_cookie" value="__Host-MCP_CONSENT_STATE=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Lax" />
         
-        <!-- STEP 1.75: Validate Entra ID state cookie correlation -->
+        <!-- Validate Entra ID state cookie correlation -->
         <set-variable name="entra_validation_result" value="@{
             try {
                 string entraReturnedState = context.Variables.GetValueOrDefault<string>("entra_returned_state", "");
@@ -221,7 +220,7 @@
         <!-- Clear the Entra ID state cookie since it's been validated -->
         <set-variable name="clear_entra_state_cookie" value="__Host-MCP_ENTRA_STATE=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=None" />
         
-        <!-- STEP 2: Retrieve stored PKCE code verifier using the session ID -->
+        <!-- Retrieve stored PKCE code verifier using the session ID -->
         <cache-lookup-value key="@("CodeVerifier-"+context.Variables.GetValueOrDefault("session_id", ""))" variable-name="codeVerifier" />
         
         <!-- Validate that code verifier was found in cache -->
@@ -242,14 +241,14 @@
             </when>
         </choose>
         
-        <!-- STEP 3: Set token request parameters -->
+        <!-- Set token request parameters -->
         <set-variable name="codeChallengeMethod" value="S256" />
         <set-variable name="redirectUri" value="{{OAuthCallbackUri}}" />
         <set-variable name="clientId" value="{{EntraIDClientId}}" />
         <set-variable name="clientAssertionType" value="@(System.Net.WebUtility.UrlEncode("urn:ietf:params:oauth:client-assertion-type:jwt-bearer"))" />
         <authentication-managed-identity resource="api://AzureADTokenExchange" client-id="{{EntraIDFicClientId}}" output-token-variable-name="ficToken"/>
          
-        <!-- STEP 4: Configure token request to Entra ID -->
+        <!-- Configure token request to Entra ID -->
         <set-method>POST</set-method>
         <set-header name="Content-Type" exists-action="override">
             <value>application/x-www-form-urlencoded</value>
@@ -264,7 +263,7 @@
         <base />
     </backend>    <outbound>
         <base />
-        <!-- STEP 5: Process the token response from Entra ID -->
+        <!-- Process the token response from Entra ID -->
         <trace source="apim-policy">
             <message>@("Token response received: " + context.Response.Body.As<string>(preserveContent: true))</message>
         </trace>
@@ -286,7 +285,7 @@
             </when>
         </choose>
         
-        <!-- STEP 6: Generate secure session token for MCP client -->
+        <!-- Generate secure session token for MCP client -->
         <set-variable name="IV" value="{{EncryptionIV}}" />
         <set-variable name="key" value="{{EncryptionKey}}" />
         <set-variable name="sessionId" value="@((string)Guid.NewGuid().ToString().Replace("-", ""))" />
@@ -304,7 +303,7 @@
             return Convert.ToBase64String(encryptedBytes);
         }" />
 
-        <!-- STEP 6: Lookup MCP client redirect URI stored during authorization -->
+        <!-- Lookup MCP client redirect URI stored during authorization -->
         <cache-lookup-value key="@((string)context.Variables.GetValueOrDefault("session_id"))" variable-name="mcpConfirmConsentCode" />
         <cache-lookup-value key="@($"McpClientAuthData-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" variable-name="mcpClientData" />
         
@@ -326,14 +325,14 @@
             </when>
         </choose>
 
-        <!-- STEP 8: Use the MCP client's original state parameter -->
+        <!-- Use the MCP client's original state parameter -->
         <set-variable name="mcp_return_state" value="@(context.Variables.GetValueOrDefault<string>("mcp_original_state"))" />
-        <!-- STEP 9: Extract the stored mcp client callback redirect uri from cache -->
+        <!-- Extract the stored mcp client callback redirect uri from cache -->
         <set-variable name="callbackRedirectUri" value="@{
             var mcpAuthDataAsJObject = JObject.Parse((string)context.Variables["mcpClientData"]);
             return mcpAuthDataAsJObject["mcpCallbackRedirectUri"];
         }" />
-        <!-- STEP 10: Store the encrypted session key and Entra token in cache -->
+        <!-- Store the encrypted session key and Entra token in cache -->
         <!-- Store the encrypted session key with the MCP confirmation code as key -->
         <cache-store-value duration="3600" 
             key="@($"AccessToken-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" 
@@ -344,7 +343,7 @@
             key="@($"EntraToken-{context.Variables.GetValueOrDefault("sessionId")}")"
             value="@(context.Response.Body.As<JObject>(preserveContent: true).ToString())" />
         
-        <!-- STEP 11: Redirect back to MCP client with confirmation code -->
+        <!-- Redirect back to MCP client with confirmation code -->
         <return-response>
             <set-status code="302" reason="Found" />
             <set-header name="Location" exists-action="override">

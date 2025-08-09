@@ -196,7 +196,7 @@
             return $"{baseUrl}?response_type=code&client_id={{EntraIDClientId}}&redirect_uri={{OAuthCallbackUri}}&scope={{OAuthScopes}}&code_challenge={codeChallenge}&code_challenge_method=S256&state={System.Net.WebUtility.UrlEncode(entraidState)}";
         }" />
         
-        <!-- STEP 5: Store authentication data in cache for use in callback -->
+        <!-- Store authentication data in cache for use in callback -->
         <!-- Generate a confirmation code to return to the MCP client -->
         <set-variable name="mcpConfirmConsentCode" value="@((string)Guid.NewGuid().ToString())" />
         
@@ -234,7 +234,7 @@
     <outbound>
         <base />        
         
-        <!-- STEP 6: Generate secure Entra ID state cookie before redirect -->
+        <!-- Generate secure Entra ID state cookie before redirect -->
         <set-variable name="entra_state_cookie" value="@{
             string sessionId = context.Variables.GetValueOrDefault<string>("sessionId", "");
             string entraidState = context.Variables.GetValueOrDefault<string>("entraidState", "");

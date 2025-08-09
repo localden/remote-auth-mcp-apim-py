@@ -10,7 +10,7 @@
 <policies>
     <inbound>
         <base />
-        <!-- STEP 1: Extract parameters from token request -->
+        <!-- Extract parameters from token request -->
         <!-- Read the request body as a string while preserving it for later processing -->
         <set-variable name="tokenRequestBody" value="@((string)context.Request.Body.As<string>(preserveContent: true))" />
         
@@ -60,14 +60,14 @@
             return "";
         }" />
             
-        <!-- STEP 2: Extract state parameters -->
+        <!-- Extract state parameters -->
         <set-variable name="mcpState" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
         <set-variable name="stateSession" value="@((string)context.Request.Url.Query.GetValueOrDefault("state_session", ""))" />        
     </inbound>
     <backend />
     <outbound>
         <base />
-        <!-- STEP 3: Retrieve stored MCP client data -->
+        <!-- Retrieve stored MCP client data -->
         <!-- Lookup the stored MCP client code challenge and challenge method from the cache -->
         <cache-lookup-value key="@($"McpClientAuthData-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" variable-name="mcpClientAuthData" />
         
@@ -76,7 +76,7 @@
             var mcpAuthDataAsJObject = JObject.Parse((string)context.Variables["mcpClientAuthData"]);
             return (string)mcpAuthDataAsJObject["mcpClientCodeChallenge"];
         }" />            
-        <!-- STEP 4: Compute and validate the code challenge -->
+        <!-- Compute and validate the code challenge -->
         <!-- Generate a challenge from the incoming code_verifier using the stored challenge method -->
         <set-variable name="mcpServerComputedCodeChallenge" value="@{
             var mcpAuthDataAsJObject = JObject.Parse((string)context.Variables["mcpClientAuthData"]);
@@ -109,7 +109,7 @@
                 return string.Empty;
             }
         }" />            
-        <!-- STEP 5: Verify code challenge matches -->
+        <!-- Verify code challenge matches -->
         <choose>
             <when condition="@(string.Compare((string)context.Variables.GetValueOrDefault("mcpServerComputedCodeChallenge", ""), (string)context.Variables.GetValueOrDefault("storedMcpClientCodeChallenge", "")) != 0)">
                 <!-- If they don't match, return an error -->
@@ -120,7 +120,7 @@
             </when>
         </choose>
         
-        <!-- STEP 5.5: Verify client registration -->
+        <!-- Verify client registration -->
         <!-- Extract client ID and redirect URI from the token request -->
         <set-variable name="client_id" value="@{
             // Retrieve the raw body string
@@ -283,11 +283,11 @@
             </when>
         </choose>
 
-        <!-- STEP 6: Retrieve cached tokens -->
+        <!-- Retrieve cached tokens -->
         <!-- Get the access token stored during the authorization process -->
         <cache-lookup-value key="@($"AccessToken-{context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}")" variable-name="cachedSessionToken" />
         
-        <!-- STEP 7: Generate token response -->
+        <!-- Generate token response -->
         <set-variable name="jsonPayload" value="@{
             var accessToken = context.Variables.GetValueOrDefault<string>("cachedSessionToken");
             var payloadObject = new
