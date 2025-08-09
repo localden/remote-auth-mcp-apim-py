@@ -4,6 +4,14 @@ This sample shows how to deploy an Entra ID-protected MCP server on Azure.
 
 The sample also uses an authorization pattern where the client acquires a token _for the MCP server_ first, and then uses [on-behalf-of flow](https://learn.microsoft.com/entra/identity-platform/v2-oauth2-on-behalf-of-flow) to exchange it for a token that can be used with [Microsoft Graph](https://learn.microsoft.com/graph/overview). It does all this in an entirely secretless manner too.
 
+## ⚠️ Important: Experimental Implementation
+
+> **This is an experimental implementation and should NOT be used in production scenarios.** 
+> 
+> This sample demonstrates how to build a protected MCP server with Entra ID by implementing OAuth 2.0 Dynamic Client Registration and PKCE flow patterns that work around current gaps in Entra ID's native support for these standards. While it showcases the technical possibilities, it's intended for educational and proof-of-concept purposes only.
+> 
+> For production scenarios, consider using established authentication patterns with pre-registered applications and standard OAuth flows.
+
 ## What it uses
 
 - ⚡ [Azure Functions](https://learn.microsoft.com/azure/azure-functions/functions-overview)
@@ -14,6 +22,87 @@ The sample also uses an authorization pattern where the client acquires a token 
 
 >[!NOTE]
 >You will need to use the [Model Context Protocol Inspector](https://modelcontextprotocol.io/docs/tools/inspector) to test the MCP server, as it's the only MCP client that currently support authorization out-of-the-box.
+
+## How the Authorization Flow Works
+
+This implementation uses a sophisticated OAuth 2.0 flow with PKCE (Proof Key for Code Exchange) to securely authenticate MCP clients. Here's how it all fits together:
+
+```mermaid
+sequenceDiagram
+    participant Client as MCP Client
+    participant Inspector as MCP Inspector
+    participant APIM as API Management
+    participant Entra as Entra ID
+    participant Function as Azure Function
+    participant Graph as Microsoft Graph
+
+    Note over Client,Graph: 1. Discovery & Registration
+    Client->>APIM: GET /.well-known/oauth-authorization-server
+    APIM->>Client: OAuth metadata (authorization_endpoint, token_endpoint, etc.)
+    
+    Client->>APIM: POST /register (Dynamic Client Registration)
+    Note over APIM: Store client info in CosmosDB<br/>Generate unique client_id
+    APIM->>Client: Client credentials (client_id, no secret)
+
+    Note over Client,Graph: 2. Authorization with PKCE
+    Note over Client: Generate code_verifier & code_challenge
+    Client->>Inspector: Open authorization URL with PKCE params
+    Inspector->>APIM: GET /authorize?client_id=...&code_challenge=...
+    
+    Note over APIM: Check for existing consent cookie<br/>🍪 __Host-MCP_APPROVED_CLIENTS
+    alt No previous consent
+        APIM->>Inspector: Redirect to /consent page
+        Note over Inspector: User reviews permissions and clicks "Allow"
+        Inspector->>APIM: POST /consent (with CSRF protection)
+        Note over APIM: Set consent cookie<br/>🍪 __Host-MCP_APPROVED_CLIENTS<br/>🍪 __Host-MCP_CONSENT_STATE
+    end
+    
+    APIM->>Inspector: Redirect to Entra ID with state correlation
+    Note over APIM: Set Entra state cookie<br/>🍪 __Host-MCP_ENTRA_STATE<br/>(contains sessionId|entraidState|clientState)
+    
+    Inspector->>Entra: Authorize with Entra ID
+    Note over Inspector: User authenticates with Entra ID
+    Entra->>APIM: Callback with authorization code
+    
+    Note over APIM: Validate state correlation<br/>Exchange code for Entra access token<br/>Generate encrypted session token
+    APIM->>Inspector: Redirect with MCP authorization code
+
+    Note over Client,Graph: 3. Token Exchange
+    Inspector->>APIM: POST /token (code + code_verifier)
+    Note over APIM: Validate PKCE challenge<br/>Return encrypted session token
+    APIM->>Inspector: Access token (encrypted session key)
+    Inspector->>Client: Token for MCP communication
+
+    Note over Client,Graph: 4. Authenticated MCP Communication
+    Client->>APIM: GET /mcp/sse (with Bearer token)
+    Note over APIM: Decrypt session token<br/>Lookup cached Entra token<br/>Add to request for downstream
+    APIM->>Function: Forward with Entra access token
+    
+    Function->>Graph: API calls using on-behalf-of flow
+    Graph->>Function: User data
+    Function->>APIM: MCP response
+    APIM->>Client: Authenticated MCP response
+```
+
+### Security Features & Cookies Used
+
+This implementation uses several security mechanisms and cookies to ensure a secure flow:
+
+| Cookie | Purpose | Security Features |
+|--------|---------|-------------------|
+| `__Host-MCP_APPROVED_CLIENTS` | Remembers user consent for specific clients | `__Host-` prefix, Secure, HttpOnly, SameSite=Lax |
+| `__Host-MCP_DENIED_CLIENTS` | Remembers denied consent to prevent re-prompting | `__Host-` prefix, Secure, HttpOnly, SameSite=Lax |
+| `__Host-MCP_CONSENT_STATE` | Validates consent form submissions | `__Host-` prefix, Secure, HttpOnly, SameSite=Lax |
+| `__Host-MCP_ENTRA_STATE` | Correlates Entra ID callback with original request | `__Host-` prefix, Secure, HttpOnly, SameSite=None |
+| `__Host-MCP_CSRF_TOKEN` | Protects against CSRF attacks on consent forms | `__Host-` prefix, Secure, HttpOnly, SameSite=Lax |
+
+**Key Security Features:**
+- 🔐 **PKCE (Proof Key for Code Exchange)** - Prevents authorization code interception
+- 🍪 **Secure Cookies** - All cookies use `__Host-` prefix for maximum security
+- 🛡️ **CSRF Protection** - Double-submit cookie pattern with constant-time validation
+- 🔄 **State Correlation** - Multiple layers of state validation prevent session fixation
+- 🔒 **Encrypted Session Tokens** - Session identifiers are AES-encrypted
+- ⏰ **Token Caching** - Entra tokens cached with encrypted session keys for performance
 
 ## Getting started
 
