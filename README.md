@@ -22,7 +22,7 @@ The sample also uses an authorization pattern where the client acquires a token 
 - 🚀 [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd?tabs=winget-windows%2Cbrew-mac%2Cscript-linux&pivots=os-windows)
 
 >[!NOTE]
->You will need to use the [Model Context Protocol Inspector](https://modelcontextprotocol.io/docs/tools/inspector) to test the MCP server, as it's the only MCP client that currently support authorization out-of-the-box.
+>You can use the [Model Context Protocol Inspector](https://modelcontextprotocol.io/docs/tools/inspector) or [Visual Studio Code](https://code.visualstudio.com) to test this MCP server.
 
 ## How the Authorization Flow Works
 
@@ -31,7 +31,7 @@ This implementation uses a sophisticated OAuth 2.0 flow with PKCE (Proof Key for
 ```mermaid
 sequenceDiagram
     participant Client as MCP Client
-    participant Inspector as MCP Inspector
+    participant Browser as User's Browser
     participant APIM as API Management
     participant Entra as Entra ID
     participant Function as Azure Function
@@ -47,32 +47,32 @@ sequenceDiagram
 
     Note over Client,Graph: 2. Authorization with PKCE
     Note over Client: Generate code_verifier & code_challenge
-    Client->>Inspector: Open authorization URL with PKCE params
-    Inspector->>APIM: GET /authorize?client_id=...&code_challenge=...
+    Client->>Browser: Open authorization URL with PKCE params
+    Browser->>APIM: GET /authorize?client_id=...&code_challenge=...
     
     Note over APIM: Check for existing consent cookie<br/>🍪 __Host-MCP_APPROVED_CLIENTS
     alt No previous consent
-        APIM->>Inspector: Redirect to /consent page
-        Note over Inspector: User reviews permissions and clicks "Allow"
-        Inspector->>APIM: POST /consent (with CSRF protection)
+        APIM->>Browser: Redirect to /consent page
+        Note over Browser: User reviews permissions and clicks "Allow"
+        Browser->>APIM: POST /consent (with CSRF protection)
         Note over APIM: Set consent cookie<br/>🍪 __Host-MCP_APPROVED_CLIENTS<br/>🍪 __Host-MCP_CONSENT_STATE
     end
     
-    APIM->>Inspector: Redirect to Entra ID with state correlation
+    APIM->>Browser: Redirect to Entra ID with state correlation
     Note over APIM: Set Entra state cookie<br/>🍪 __Host-MCP_ENTRA_STATE<br/>(contains sessionId|entraidState|clientState)
     
-    Inspector->>Entra: Authorize with Entra ID
-    Note over Inspector: User authenticates with Entra ID
+    Browser->>Entra: Authorize with Entra ID
+    Note over Browser: User authenticates with Entra ID
     Entra->>APIM: Callback with authorization code
     
     Note over APIM: Validate state correlation<br/>Exchange code for Entra access token<br/>Generate encrypted session token
-    APIM->>Inspector: Redirect with MCP authorization code
+    APIM->>Browser: Redirect with MCP authorization code
 
     Note over Client,Graph: 3. Token Exchange
-    Inspector->>APIM: POST /token (code + code_verifier)
+    Browser->>APIM: POST /token (code + code_verifier)
     Note over APIM: Validate PKCE challenge<br/>Return encrypted session token
-    APIM->>Inspector: Access token (encrypted session key)
-    Inspector->>Client: Token for MCP communication
+    APIM->>Browser: Access token (encrypted session key)
+    Browser->>Client: Token for MCP communication
 
     Note over Client,Graph: 4. Authenticated MCP Communication
     Client->>APIM: GET /mcp/sse (with Bearer token)
