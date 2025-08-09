@@ -89,13 +89,16 @@ sequenceDiagram
 
 This implementation uses several security mechanisms and cookies to ensure a secure flow:
 
-| Cookie | Purpose | Security Features |
-|--------|---------|-------------------|
-| `__Host-MCP_APPROVED_CLIENTS` | Remembers user consent for specific clients | `__Host-` prefix, Secure, HttpOnly, SameSite=Lax |
-| `__Host-MCP_DENIED_CLIENTS` | Remembers denied consent to prevent re-prompting | `__Host-` prefix, Secure, HttpOnly, SameSite=Lax |
-| `__Host-MCP_CONSENT_STATE` | Validates consent form submissions | `__Host-` prefix, Secure, HttpOnly, SameSite=Lax |
-| `__Host-MCP_ENTRA_STATE` | Correlates Entra ID callback with original request | `__Host-` prefix, Secure, HttpOnly, SameSite=None |
-| `__Host-MCP_CSRF_TOKEN` | Protects against CSRF attacks on consent forms | `__Host-` prefix, Secure, HttpOnly, SameSite=Lax |
+| Cookie | Purpose |
+|--------|---------|
+| `__Host-MCP_APPROVED_CLIENTS` | Remembers user consent for specific clients |
+| `__Host-MCP_DENIED_CLIENTS` | Remembers denied consent to prevent re-prompting |
+| `__Host-MCP_CONSENT_STATE` | Validates consent form submissions |
+| `__Host-MCP_ENTRA_STATE` | Correlates Entra ID callback with original request |
+| `__Host-MCP_CSRF_TOKEN` | Protects against CSRF attacks on consent forms |
+
+>[!NOTE]
+> All cookies use `__Host-` prefix, Secure, HttpOnly, and SameSite=Lax for maximum security (except `__Host-MCP_ENTRA_STATE` which uses SameSite=None for cross-site redirects).
 
 **Key Security Features:**
 
