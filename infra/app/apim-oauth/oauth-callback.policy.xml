@@ -5,7 +5,7 @@
 <policies>
     <inbound>
         <base />
-        <!-- STEP 1: Extract the authorization code and state from Entra ID callback -->
+    <!-- Extract the authorization code and state from Entra ID callback -->
         <set-variable name="authCode" value="@((string)context.Request.Url.Query.GetValueOrDefault("code", ""))" />
         <set-variable name="entra_returned_state" value="@{
             string stateValue = (string)context.Request.Url.Query.GetValueOrDefault("state", "");

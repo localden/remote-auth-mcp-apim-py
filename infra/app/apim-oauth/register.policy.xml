@@ -1,11 +1,5 @@
 <!--
-    REG        <!-- Extract client registration data from request -->
-        <set-variable name="requestBodyAsJObject" value="@(context.Request.Body.As<JObject>(preserveContent: true))" />
-        
-        <!-- Generate a unique client ID (GUID) -->
-        <set-variable name="generatedClientId" value="@((string)Guid.NewGuid().ToString())" />
-        
-        <!-- Prepare client info document for CosmosDB -->OLICY
+    REGISTER POLICY
     This policy implements the dynamic client registration endpoint for OAuth2 flow.
     
     Flow:
@@ -16,17 +10,18 @@
 <policies>
     <inbound>
         <base />
-        <!-- STEP 1: Extract client registration data from request -->
+
+    <!-- Extract client registration data from request -->
         <set-variable name="requestBody" value="@(context.Request.Body.As<JObject>(preserveContent: true))" />
-        
-        <!-- STEP 2: Generate a unique client ID (GUID) -->
+
+    <!-- Generate a unique client ID (GUID) -->
         <set-variable name="uniqueClientId" value="@(Guid.NewGuid().ToString())" />
-        
-        <!-- STEP 3: Prepare client info document for CosmosDB -->
+
+    <!-- Prepare client info document for CosmosDB -->
         <set-variable name="clientDocument" value="@{
             var requestBody = context.Variables.GetValueOrDefault<JObject>("requestBody");
             var uniqueClientId = context.Variables.GetValueOrDefault<string>("uniqueClientId");
-            
+
             var document = new JObject();
             document["id"] = uniqueClientId;
             document["clientId"] = uniqueClientId;
@@ -34,14 +29,14 @@
             document["client_uri"] = requestBody["client_uri"]?.ToString() ?? "";
             document["redirect_uris"] = requestBody["redirect_uris"];
             document["created_at"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            
+
             return document.ToString();
         }" />
-        
-        <!-- Get CosmosDB access token using managed identity -->
+
+    <!-- Get CosmosDB access token using managed identity -->
         <authentication-managed-identity resource="https://cosmos.azure.com" output-token-variable-name="cosmosAccessToken" />
-        
-        <!-- Store client registration in CosmosDB using AAD token -->
+
+    <!-- Store client registration in CosmosDB using AAD token -->
         <send-request mode="new" response-variable-name="cosmosResponse" timeout="30" ignore-error="false">
             <set-url>@($"{{CosmosDbEndpoint}}/dbs/{{CosmosDbDatabase}}/colls/{{CosmosDbContainer}}/docs")</set-url>
             <set-method>POST</set-method>
@@ -59,8 +54,8 @@
             </set-header>
             <set-body>@(context.Variables.GetValueOrDefault<string>("clientDocument"))</set-body>
         </send-request>
-        
-        <!-- Check if CosmosDB operation was successful -->
+
+    <!-- Check if CosmosDB operation was successful -->
         <choose>
             <when condition="@(((IResponse)context.Variables["cosmosResponse"]).StatusCode >= 400)">
                 <return-response>
@@ -79,14 +74,9 @@
             </when>
         </choose>
 
-        <!-- Cache the redirect URI for backward compatibility with other policies -->
-        <cache-store-value duration="3600" 
-            key="ClientRedirectUri" 
-            value="@(context.Variables.GetValueOrDefault<JObject>("requestBody")["redirect_uris"][0].ToString())" />
-        
-        <!-- Store client info by client ID for easy lookup during consent -->
-        <cache-store-value duration="3600" 
-            key="@($"ClientInfo-{context.Variables.GetValueOrDefault<string>("uniqueClientId")}")" 
+    <!-- Optionally cache client info by client ID for quick lookup during consent -->
+        <cache-store-value duration="3600"
+            key="@($"ClientInfo-{context.Variables.GetValueOrDefault<string>("uniqueClientId")}")"
             value="@{
                 var requestBody = context.Variables.GetValueOrDefault<JObject>("requestBody");
                 var clientInfo = new JObject();
@@ -95,39 +85,25 @@
                 clientInfo["redirect_uris"] = requestBody["redirect_uris"];
                 return clientInfo.ToString();
             }" />
-        
-        <!-- STEP 8: Set response content type -->
-                    value="@(context.Variables.GetValueOrDefault<string>("clientIdRedirectUri"))" />
-        
-        <!-- Set response content type -->
-        <set-header name="Content-Type" exists-action="override">
-            <value>application/json</value>
-        </set-header>
-        
-        <!-- Return client credentials response -->
-        
-        <!-- STEP 9: Return client credentials response -->
+
+    <!-- Return client credentials response -->
         <return-response>
             <set-status code="200" reason="OK" />
+            <set-header name="Content-Type" exists-action="override">
+                <value>application/json</value>
+            </set-header>
             <set-header name="access-control-allow-origin" exists-action="override">
                 <value>*</value>
             </set-header>
             <set-body template="none">@{
                 var requestBody = context.Variables.GetValueOrDefault<JObject>("requestBody");
-                
-                // Generate timestamps dynamically
-                // Current time in seconds since epoch (Unix timestamp)
-                long currentTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-                
-                // Client ID issued at current time
-                long clientIdIssuedAt = currentTimeSeconds;
-                
-                // Client secret expires in 1 year (31536000 seconds = 365 days)
-                long clientSecretExpiresAt = currentTimeSeconds + 31536000;
 
-                // Use the generated client ID from earlier
+                long currentTimeSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                long clientIdIssuedAt = currentTimeSeconds;
+                long clientSecretExpiresAt = currentTimeSeconds + 31536000; // 1 year
+
                 string uniqueClientId = context.Variables.GetValueOrDefault<string>("uniqueClientId", Guid.NewGuid().ToString());
-                
+
                 return new JObject
                 {
                     ["client_id"] = uniqueClientId,
