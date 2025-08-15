@@ -99,7 +99,7 @@ resource OAuthScopesNamedValue 'Microsoft.ApiManagement/service/namedValues@2021
   name: 'OAuthScopes'
   properties: {
     displayName: 'OAuthScopes'
-    value: 'User.Read'
+    value: 'User.Read'  // Show the actual downstream scopes that the API will request
     secret: false
   }
 }

@@ -142,8 +142,31 @@ def validate_bearer_token(bearer_token, expected_audience):
             return False, f"JWT has an invalid audience. Expected: {expected_audience}", None
         except jwt.exceptions.ExpiredSignatureError:
             return False, "JWT token has expired", None
-        except jwt.exceptions.InvalidSignatureError:
-            return False, "JWT has an invalid signature", None
+        except jwt.exceptions.InvalidSignatureError as sig_error:
+            try:
+                header = jwt.get_unverified_header(bearer_token)
+                payload = jwt.decode(bearer_token, options={"verify_signature": False})
+                
+                # Log detailed signature validation failure information
+                logging.error(f"JWT signature validation failed - "
+                            f"Algorithm: {header.get('alg', 'unknown')}, "
+                            f"Key ID: {header.get('kid', 'unknown')}, "
+                            f"Token type: {header.get('typ', 'unknown')}, "
+                            f"Issuer: {payload.get('iss', 'unknown')}, "
+                            f"Subject: {payload.get('sub', 'unknown')}, "
+                            f"Audience: {payload.get('aud', 'unknown')}, "
+                            f"Expected audience: {expected_audience}, "
+                            f"App ID: {payload.get('appid', 'unknown')}, "
+                            f"Tenant ID: {payload.get('tid', 'unknown')}")
+                
+                # Log signing key information (without exposing the key itself)
+                if hasattr(signing_key, 'key_size'):
+                    logging.error(f"Signing key details - Key size: {signing_key.key_size} bits")
+                    
+                return False, f"JWT signature validation failed. Key ID: {header.get('kid', 'unknown')}, Algorithm: {header.get('alg', 'unknown')}, Token audience: {payload.get('aud', 'unknown')}, Expected audience: {expected_audience}", None
+            except Exception as context_error:
+                logging.error(f"JWT signature validation failed (could not extract context: {str(context_error)})")
+                return False, f"JWT signature validation failed (unable to extract token details: {str(context_error)})", None
         except PyJWTError as jwt_error:
             error_message = f"JWT validation failed: {str(jwt_error)}"
             logging.error(f"JWT validation error: {error_message}")
@@ -182,13 +205,10 @@ def get_graph_user_details(context) -> str:
     
     try:
         logging.info(f"Context type: {type(context).__name__}")
-        # Parse context to get the bearer token
         try:
             context_obj = json.loads(context)
-            # Navigate through nested structure to find bearerToken in arguments
             arguments = context_obj.get('arguments', {})
             bearer_token = None
-              # Log the arguments structure for debugging
             logging.info(f"Arguments structure: {json.dumps(arguments)[:500]}")
             
             if isinstance(arguments, dict):
@@ -199,8 +219,7 @@ def get_graph_user_details(context) -> str:
                 token_acquired = False
                 token_error = "No bearer token found in context arguments"
             else:
-                # Validate the JWT token using the dedicated function
-                expected_audience = f"api://{application_cid}"
+                expected_audience = f"{application_cid}"
                 is_valid, validation_error, decoded_token = validate_bearer_token(bearer_token, expected_audience)
                 
                 if is_valid:

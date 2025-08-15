@@ -51,12 +51,25 @@ resource entraResourceApp 'Microsoft.Graph/applications@v1.0' = {
   }
 }
 
+var identifierUri = 'api://${entraResourceApp.appId}'
+
+// workaround for https://github.com/microsoftgraph/msgraph-bicep-types/issues/239
+resource appWithIdentifierUris 'Microsoft.Graph/applications@v1.0' = {
+  displayName: entraResourceApp.displayName
+  uniqueName: entraAppUniqueName
+  identifierUris: [
+    identifierUri
+  ]
+  web: entraResourceApp.web
+  requiredResourceAccess: entraResourceApp.requiredResourceAccess
+}
+
 resource microsoftGraphServicePrincipal 'Microsoft.Graph/servicePrincipals@v1.0' existing = {
   appId: '00000003-0000-0000-c000-000000000000'
 }
 
 resource applicationRegistrationServicePrincipal 'Microsoft.Graph/servicePrincipals@v1.0' = {
-  appId: entraResourceApp.appId
+  appId: appWithIdentifierUris.appId
 }
 
 resource grants 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = {
@@ -67,5 +80,5 @@ resource grants 'Microsoft.Graph/oauth2PermissionGrants@v1.0' = {
 }
 
 // Outputs
-output entraAppId string = entraResourceApp.appId
+output entraAppId string = appWithIdentifierUris.appId
 output entraAppTenantId string = tenantId

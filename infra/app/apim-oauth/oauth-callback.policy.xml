@@ -254,7 +254,7 @@
             <value>application/x-www-form-urlencoded</value>
         </set-header>
         <set-body>@{
-            return $"client_id={context.Variables.GetValueOrDefault("clientId")}&grant_type=authorization_code&code={context.Variables.GetValueOrDefault("authCode")}&redirect_uri={context.Variables.GetValueOrDefault("redirectUri")}&scope=User.Read&code_verifier={context.Variables.GetValueOrDefault("codeVerifier")}&client_assertion_type={context.Variables.GetValueOrDefault("clientAssertionType")}&client_assertion={context.Variables.GetValueOrDefault("ficToken")}";
+            return $"client_id={context.Variables.GetValueOrDefault("clientId")}&grant_type=authorization_code&code={context.Variables.GetValueOrDefault("authCode")}&redirect_uri={context.Variables.GetValueOrDefault("redirectUri")}&scope={context.Variables.GetValueOrDefault("clientId")}/.default&code_verifier={context.Variables.GetValueOrDefault("codeVerifier")}&client_assertion_type={context.Variables.GetValueOrDefault("clientAssertionType")}&client_assertion={context.Variables.GetValueOrDefault("ficToken")}";
         }</set-body>
         <rewrite-uri template="/token" />
     </inbound>
