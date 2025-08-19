@@ -61,6 +61,27 @@
             }
         }" />
         
+        <!-- Detect if a consent state cookie is present (used only when consent page was shown) -->
+        <set-variable name="has_consent_cookie" value="@{
+            try {
+                var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
+                if (string.IsNullOrEmpty(cookieHeader)) {
+                    return false;
+                }
+                string cookieName = "__Host-MCP_CONSENT_STATE";
+                string[] cookies = cookieHeader.Split(';');
+                foreach (string cookie in cookies) {
+                    string trimmedCookie = cookie.Trim();
+                    if (trimmedCookie.StartsWith(cookieName + "=")) {
+                        return true;
+                    }
+                }
+                return false;
+            } catch (Exception) {
+                return false;
+            }
+        }" />
+
         <!-- Validate that the original MCP client state matches what the user consented to -->
         <set-variable name="mcp_consent_valid" value="@{
             try {
@@ -109,7 +130,9 @@
         
         <!-- Validate consent state cookie -->
         <choose>
-            <when condition="@(!context.Variables.GetValueOrDefault<bool>("mcp_consent_valid"))">
+          <!-- Only enforce consent-state validation if the consent cookie is present.
+              For re-auth flows that skip the consent page (approved clients), this cookie won't exist. -->
+          <when condition="@(context.Variables.GetValueOrDefault<bool>("has_consent_cookie") && !context.Variables.GetValueOrDefault<bool>("mcp_consent_valid"))">
                 <return-response>
                     <set-status code="400" reason="Bad Request" />
                     <set-header name="Content-Type" exists-action="override">
