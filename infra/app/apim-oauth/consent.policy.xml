@@ -1014,7 +1014,7 @@ __COMMON_STYLES__    /* Additional styles for scopes list */
                             string codeChallenge = context.Variables.GetValueOrDefault<string>("code_challenge", "");
                             string codeChallengeMethod = context.Variables.GetValueOrDefault<string>("code_challenge_method", "");
                             
-                            string url = $"{baseUrl}/authorize?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}";
+                            string url = $"{baseUrl}/authorize?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}&state={encodedState}&consent_shown=1";
                             
                             if (!string.IsNullOrEmpty(codeChallenge)) {
                                 url += $"&code_challenge={System.Net.WebUtility.UrlEncode(codeChallenge)}";
