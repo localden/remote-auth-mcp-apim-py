@@ -6,12 +6,12 @@
     <inbound>
         <base />
     <!-- Extract the authorization code and state from Entra ID callback -->
-        <set-variable name="authCode" value="@((string)context.Request.Url.Query.GetValueOrDefault("code", ""))" />
-        <set-variable name="entra_returned_state" value="@{
+    <set-variable name="authCode" value='@((string)context.Request.Url.Query.GetValueOrDefault("code", ""))' />
+        <set-variable name="entra_returned_state" value='@{
             string stateValue = (string)context.Request.Url.Query.GetValueOrDefault("state", "");
             return !string.IsNullOrEmpty(stateValue) ? System.Net.WebUtility.UrlDecode(stateValue) : "";
-        }" />
-        <set-variable name="sessionState" value="@((string)context.Request.Url.Query.GetValueOrDefault("session_state", ""))" />
+        }' />
+    <set-variable name="sessionState" value='@((string)context.Request.Url.Query.GetValueOrDefault("session_state", ""))' />
         
         <!-- Validate required OAuth parameters -->
         <choose>
@@ -31,7 +31,7 @@
             </when>
         </choose>
         
-        <!-- Extract original MCP client state from Entra ID state cookie -->
+    <!-- Extract original MCP client state from Entra ID state cookie (fallback only) -->
         <set-variable name="mcp_original_state" value="@{
             try {
                 var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
@@ -60,7 +60,31 @@
                 return "";
             }
         }" />
+
+    <!-- Lookup session ID via Entra ID state mapping in server-side cache (authoritative) -->
+    <cache-lookup-value key="@($"EntraidState-{context.Variables.GetValueOrDefault("entra_returned_state", "")}")" variable-name="session_id_from_cache" />
         
+        <!-- Detect if a consent state cookie is present (used only when consent page was shown) -->
+        <set-variable name="has_consent_cookie" value="@{
+            try {
+                var cookieHeader = context.Request.Headers.GetValueOrDefault("Cookie", "");
+                if (string.IsNullOrEmpty(cookieHeader)) {
+                    return false;
+                }
+                string cookieName = "__Host-MCP_CONSENT_STATE";
+                string[] cookies = cookieHeader.Split(';');
+                foreach (string cookie in cookies) {
+                    string trimmedCookie = cookie.Trim();
+                    if (trimmedCookie.StartsWith(cookieName + "=")) {
+                        return true;
+                    }
+                }
+                return false;
+            } catch (Exception) {
+                return false;
+            }
+        }" />
+
         <!-- Validate that the original MCP client state matches what the user consented to -->
         <set-variable name="mcp_consent_valid" value="@{
             try {
@@ -107,9 +131,13 @@
             }
         }" />
         
-        <!-- Validate consent state cookie -->
+        <!-- Look up if the consent UI was shown for this session (server-side flag set during /authorize after consent) -->
+        <cache-lookup-value key="@($"ConsentShown-{context.Variables.GetValueOrDefault("session_id_from_cache", "")}")" variable-name="consentShownFlag" />
+
+        <!-- Validate consent state cookie when consent UI was shown -->
         <choose>
-            <when condition="@(!context.Variables.GetValueOrDefault<bool>("mcp_consent_valid"))">
+            <!-- Enforce only if server-side ConsentShown flag indicates consent UI was displayed for this flow -->
+            <when condition="@(((string)context.Variables.GetValueOrDefault("consentShownFlag", "")).ToLower() == "true" && !context.Variables.GetValueOrDefault<bool>("mcp_consent_valid"))">
                 <return-response>
                     <set-status code="400" reason="Bad Request" />
                     <set-header name="Content-Type" exists-action="override">
@@ -128,12 +156,17 @@
         <!-- Clear the consent state cookie since it's been validated -->
         <set-variable name="clear_consent_cookie" value="__Host-MCP_CONSENT_STATE=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=Lax" />
         
-        <!-- Validate Entra ID state cookie correlation -->
+        <!-- Validate Entra ID state correlation: prefer cache mapping, fallback to cookie -->
         <set-variable name="entra_validation_result" value="@{
             try {
                 string entraReturnedState = context.Variables.GetValueOrDefault<string>("entra_returned_state", "");
                 if (string.IsNullOrEmpty(entraReturnedState)) {
                     return "invalid|";
+                }
+                // First, try server-side cache mapping created at /authorize
+                string sessionFromCache = context.Variables.GetValueOrDefault<string>("session_id_from_cache", "");
+                if (!string.IsNullOrEmpty(sessionFromCache)) {
+                    return $"valid|{sessionFromCache}";
                 }
                 
                 // Extract Entra ID state from cookie
@@ -194,6 +227,8 @@
             string[] parts = validationResult.Split('|');
             return parts.Length > 1 ? parts[1] : "";
         }" />
+    <!-- Overwrite consentShownFlag using resolved session_id to work with both cache and cookie correlation paths -->
+    <cache-lookup-value key="@($"ConsentShown-{context.Variables.GetValueOrDefault("session_id", "")}")" variable-name="consentShownFlag" />
         
         <!-- Validate Entra ID state cookie -->
         <choose>
@@ -325,8 +360,15 @@
             </when>
         </choose>
 
-        <!-- Use the MCP client's original state parameter -->
-        <set-variable name="mcp_return_state" value="@(context.Variables.GetValueOrDefault<string>("mcp_original_state"))" />
+        <!-- Use the MCP client's original state parameter from cached client data (authoritative) -->
+        <set-variable name="mcp_return_state" value="@{
+            try {
+                var mcpAuthDataAsJObject = JObject.Parse((string)context.Variables["mcpClientData"]);
+                return (string)mcpAuthDataAsJObject["mcpClientState"]; // fallback to cookie-derived value only if missing
+            } catch {
+                return context.Variables.GetValueOrDefault<string>("mcp_original_state");
+            }
+        }" />
         <!-- Extract the stored mcp client callback redirect uri from cache -->
         <set-variable name="callbackRedirectUri" value="@{
             var mcpAuthDataAsJObject = JObject.Parse((string)context.Variables["mcpClientData"]);
@@ -347,7 +389,7 @@
         <return-response>
             <set-status code="302" reason="Found" />
             <set-header name="Location" exists-action="override">
-                <value>@($"{context.Variables.GetValueOrDefault("callbackRedirectUri")}?code={context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}&state={System.Net.WebUtility.UrlEncode((string)context.Variables.GetValueOrDefault("mcp_return_state"))}")</value>
+                <value>@($"{context.Variables.GetValueOrDefault("callbackRedirectUri")}?code={context.Variables.GetValueOrDefault("mcpConfirmConsentCode")}&state={(string)context.Variables.GetValueOrDefault("mcp_return_state")}")</value>
             </set-header>
             <!-- Clear the consent state cookie -->
             <set-header name="Set-Cookie" exists-action="append">

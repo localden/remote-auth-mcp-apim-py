@@ -8,17 +8,18 @@
     <inbound>
         <base />
         <!-- Extract all OAuth parameters -->
-        <set-variable name="clientId" value="@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))" />
-        <set-variable name="redirect_uri" value="@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))" />
-        <set-variable name="currentState" value="@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))" />
-        <set-variable name="mcpScope" value="@((string)context.Request.Url.Query.GetValueOrDefault("scope", ""))" />
-        <set-variable name="mcpClientCodeChallenge" value="@((string)context.Request.Url.Query.GetValueOrDefault("code_challenge", ""))" />
-        <set-variable name="mcpClientCodeChallengeMethod" value="@((string)context.Request.Url.Query.GetValueOrDefault("code_challenge_method", ""))" />
+    <set-variable name="clientId" value='@((string)context.Request.Url.Query.GetValueOrDefault("client_id", ""))' />
+    <set-variable name="redirect_uri" value='@((string)context.Request.Url.Query.GetValueOrDefault("redirect_uri", ""))' />
+    <set-variable name="currentState" value='@((string)context.Request.Url.Query.GetValueOrDefault("state", ""))' />
+    <set-variable name="mcpScope" value='@((string)context.Request.Url.Query.GetValueOrDefault("scope", ""))' />
+    <set-variable name="mcpClientCodeChallenge" value='@((string)context.Request.Url.Query.GetValueOrDefault("code_challenge", ""))' />
+    <set-variable name="mcpClientCodeChallengeMethod" value='@((string)context.Request.Url.Query.GetValueOrDefault("code_challenge_method", ""))' />
+    <set-variable name="consentShownMarker" value='@((string)context.Request.Url.Query.GetValueOrDefault("consent_shown", ""))' />
         
         <!-- Validate required OAuth parameters (state is optional per RFC 6749) -->
         <choose>
-            <when condition="@(string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("clientId")) || 
-                              string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("redirect_uri")))">
+            <when condition='@(string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("clientId", "")) || 
+                              string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("redirect_uri", "")))'>
                 <return-response>
                     <set-status code="400" reason="Bad Request" />
                     <set-header name="Content-Type" exists-action="override">
@@ -39,8 +40,8 @@
         
         <!-- Validate required PKCE parameters -->
         <choose>
-            <when condition="@(string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("mcpClientCodeChallenge")) || 
-                              string.IsNullOrEmpty(context.Variables.GetValueOrDefault<string>("mcpClientCodeChallengeMethod")))">
+            <when condition='@(string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("mcpClientCodeChallenge", "")) || 
+                              string.IsNullOrEmpty((string)context.Variables.GetValueOrDefault("mcpClientCodeChallengeMethod", "")))'>
                 <return-response>
                     <set-status code="400" reason="Bad Request" />
                     <set-header name="Content-Type" exists-action="override">
@@ -148,9 +149,9 @@
                             // Build URL with optional state parameter
                             string url = $"{basePath}/consent?client_id={encodedClientId}&redirect_uri={encodedRedirectUri}";
                             
-                            // Only add state parameter if it was provided by the client
+                            // Only add state parameter if it was provided by the client (encode at the boundary)
                             if (!string.IsNullOrEmpty(state)) {
-                                url += $"&state={state}";
+                                url += $"&state={System.Net.WebUtility.UrlEncode(state)}";
                             }
                             
                             // Add PKCE parameters
@@ -179,6 +180,15 @@
             // This ensures server controls the session identifier completely
             return Guid.NewGuid().ToString();
         }" />
+
+        <!-- If consent_shown=1 is present, mark the server-side session for consent-state enforcement -->
+        <choose>
+            <when condition="@(context.Variables.GetValueOrDefault<string>("consentShownMarker", "") == "1")">
+                <cache-store-value duration="3600"
+                    key="@($"ConsentShown-{context.Variables.GetValueOrDefault("sessionId", "")}")"
+                    value="true" />
+            </when>
+        </choose>
         
         <!-- Generate a separate state parameter for Entra ID -->
         <set-variable name="entraidState" value="@{
