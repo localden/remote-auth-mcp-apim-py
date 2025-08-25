@@ -182,7 +182,7 @@
                 <authentication-managed-identity resource="https://cosmos.azure.com" output-token-variable-name="cosmosAccessToken" />
                 
                 <send-request mode="new" response-variable-name="cosmosClientResponse" timeout="30" ignore-error="true">
-                    <set-url>@($"{{CosmosDbEndpoint}}/dbs/{{CosmosDbDatabase}}/colls/{{CosmosDbContainer}}/docs/{context.Variables.GetValueOrDefault<string>("client_id")}")</set-url>
+                    <set-url>@($"{{CosmosDbEndpoint}}dbs/{{CosmosDbDatabase}}/colls/{{CosmosDbContainer}}/docs/{context.Variables.GetValueOrDefault<string>("client_id")}")</set-url>
                     <set-method>GET</set-method>
                     <set-header name="Content-Type" exists-action="override">
                         <value>application/json</value>
@@ -190,7 +190,7 @@
                     <set-header name="x-ms-version" exists-action="override">
                         <value>2018-12-31</value>
                     </set-header>
-                    <set-header name="x-ms-partitionkey" exists-action="override">
+                    <set-header name="x-ms-documentdb-partitionkey" exists-action="override">
                         <value>@($"[\"{context.Variables.GetValueOrDefault<string>("client_id")}\"]")</value>
                     </set-header>
                     <set-header name="Authorization" exists-action="override">

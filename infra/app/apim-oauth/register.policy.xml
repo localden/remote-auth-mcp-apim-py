@@ -38,7 +38,7 @@
 
     <!-- Store client registration in CosmosDB using AAD token -->
         <send-request mode="new" response-variable-name="cosmosResponse" timeout="30" ignore-error="false">
-            <set-url>@($"{{CosmosDbEndpoint}}/dbs/{{CosmosDbDatabase}}/colls/{{CosmosDbContainer}}/docs")</set-url>
+            <set-url>@($"{{CosmosDbEndpoint}}dbs/{{CosmosDbDatabase}}/colls/{{CosmosDbContainer}}/docs")</set-url>
             <set-method>POST</set-method>
             <set-header name="Content-Type" exists-action="override">
                 <value>application/json</value>
